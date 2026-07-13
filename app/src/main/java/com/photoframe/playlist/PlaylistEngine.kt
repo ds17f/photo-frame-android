@@ -1,0 +1,161 @@
+package com.photoframe.playlist
+
+import com.photoframe.playlist.model.OrderMode
+import com.photoframe.playlist.model.PlaylistPhoto
+import com.photoframe.playlist.model.PortraitMode
+import com.photoframe.playlist.model.Slide
+import java.time.Duration
+import java.time.Instant
+import kotlin.random.Random
+
+/**
+ * Stateful slideshow playlist over the merged photo set (DESIGN §7).
+ *
+ * - Produces [Slide]s (single photos or portrait pairs) on demand via [next]/[previous].
+ * - Shuffle modes draw random-without-replacement from a "bag"; when the bag empties a new
+ *   cycle is drawn. Recency-boosted shuffle weights recently-added photos ~3×.
+ * - Newly-synced photos are spliced near the front of the current bag so they appear soon.
+ * - Keeps a bounded history so back-swipes revisit the actual previously-shown slides.
+ *
+ * All randomness and time flow through injected [random]/[clock] so the engine is fully
+ * deterministic under test. Not thread-safe; drive it from a single coroutine/dispatcher.
+ */
+class PlaylistEngine(
+    private val random: Random = Random.Default,
+    private val clock: () -> Instant = Instant::now,
+) {
+    private val all = LinkedHashMap<String, PlaylistPhoto>()
+    private val remaining = ArrayDeque<PlaylistPhoto>()
+    private val history = ArrayList<Slide>()
+    private var historyIndex = -1
+
+    var orderMode: OrderMode = OrderMode.SHUFFLE
+        private set
+    var portraitMode: PortraitMode = PortraitMode.AUTO
+        private set
+    var recencyWindow: Duration = Duration.ofDays(7)
+        private set
+
+    val size: Int get() = all.size
+    val isEmpty: Boolean get() = all.isEmpty()
+
+    /** Replace display settings live. Changing the order mode starts a fresh bag; changing
+     *  only the portrait mode affects future slides without disturbing the current bag. */
+    fun updateConfig(
+        orderMode: OrderMode = this.orderMode,
+        portraitMode: PortraitMode = this.portraitMode,
+        recencyWindow: Duration = this.recencyWindow,
+    ) {
+        val orderChanged = orderMode != this.orderMode || recencyWindow != this.recencyWindow
+        this.orderMode = orderMode
+        this.portraitMode = portraitMode
+        this.recencyWindow = recencyWindow
+        if (orderChanged) startNewCycle()
+    }
+
+    /**
+     * Set the full desired photo set. New photos are spliced near the front of the current
+     * bag (shuffle) or inserted in sorted position (ordered modes); vanished photos are
+     * dropped from the bag. Existing bag order is otherwise preserved.
+     */
+    fun setPhotos(photos: List<PlaylistPhoto>) {
+        val incoming = LinkedHashMap<String, PlaylistPhoto>(photos.size)
+        for (p in photos) incoming[p.id] = p
+
+        val addedIds = incoming.keys - all.keys
+        val removedIds = all.keys - incoming.keys
+
+        all.clear()
+        all.putAll(incoming)
+
+        // Drop vanished photos from the pending bag.
+        if (removedIds.isNotEmpty()) remaining.removeAll { it.id in removedIds }
+
+        if (addedIds.isEmpty()) return
+        val added = addedIds.map { incoming.getValue(it) }
+
+        if (remaining.isEmpty() && history.isEmpty()) {
+            // Nothing playing yet; the first next() will build the initial cycle.
+            return
+        }
+        spliceIn(added)
+    }
+
+    private fun spliceIn(added: List<PlaylistPhoto>) {
+        when (orderMode) {
+            OrderMode.CHRONOLOGICAL, OrderMode.NEWEST_FIRST -> {
+                remaining.addAll(added)
+                val sorted = PhotoOrdering.order(
+                    remaining.toList(), orderMode, random, clock(), recencyWindow,
+                )
+                remaining.clear()
+                remaining.addAll(sorted)
+            }
+            OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE -> {
+                // Splice near the front so new photos show up soon (DESIGN §7), but not all
+                // stacked at index 0 when several arrive at once.
+                for (p in added) {
+                    val bound = minOf(SPLICE_FRONT_WINDOW, remaining.size)
+                    val at = if (bound == 0) 0 else random.nextInt(bound + 1)
+                    remaining.add(at, p)
+                }
+            }
+        }
+    }
+
+    private fun startNewCycle() {
+        remaining.clear()
+        remaining.addAll(
+            PhotoOrdering.order(all.values.toList(), orderMode, random, clock(), recencyWindow),
+        )
+    }
+
+    /** Current slide, or null if nothing has been shown yet. */
+    fun current(): Slide? = history.getOrNull(historyIndex)
+
+    /** Advance to the next slide. Re-shows forward history first, then generates new slides. */
+    fun next(): Slide? {
+        if (historyIndex < history.lastIndex) {
+            historyIndex++
+            return history[historyIndex]
+        }
+        if (all.isEmpty()) return null
+        if (remaining.isEmpty()) startNewCycle()
+
+        val slide = SlideBuilder.nextSlide(remaining, portraitMode) ?: return current()
+        history.add(slide)
+        historyIndex = history.lastIndex
+        trimHistory()
+        return slide
+    }
+
+    /** Go back to the previously-shown slide (bounded by retained history). */
+    fun previous(): Slide? {
+        if (historyIndex > 0) historyIndex--
+        return current()
+    }
+
+    /** Discard all playback state (bag + history); keeps the photo set and settings. */
+    fun reset() {
+        remaining.clear()
+        history.clear()
+        historyIndex = -1
+    }
+
+    private fun trimHistory() {
+        val overflow = history.size - MAX_HISTORY
+        if (overflow > 0) {
+            repeat(overflow) { history.removeAt(0) }
+            historyIndex -= overflow
+            if (historyIndex < 0) historyIndex = 0
+        }
+    }
+
+    companion object {
+        /** New photos are inserted within the first N bag positions (shuffle modes). */
+        const val SPLICE_FRONT_WINDOW = 3
+
+        /** Upper bound on retained back-navigation history. */
+        const val MAX_HISTORY = 100
+    }
+}

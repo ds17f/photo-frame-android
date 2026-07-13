@@ -8,7 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.photoframe.ui.SlideshowScreen
+import com.photoframe.ui.SlideshowRoute
 import com.photoframe.ui.theme.PhotoFrameTheme
 
 /**
@@ -28,7 +28,7 @@ class SlideshowActivity : ComponentActivity() {
 
         setContent {
             PhotoFrameTheme {
-                SlideshowScreen()
+                SlideshowRoute(onExit = { finish() })
             }
         }
     }

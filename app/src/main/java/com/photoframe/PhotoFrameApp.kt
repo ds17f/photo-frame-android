@@ -12,6 +12,9 @@ import coil.memory.MemoryCache
  */
 class PhotoFrameApp : Application(), ImageLoaderFactory {
 
+    /** App-wide dependency container; reached from ViewModels via the application context. */
+    val container: AppContainer by lazy { AppContainer(this) }
+
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
             .memoryCache {

@@ -1,0 +1,14 @@
+# Gradle / Android build
+.gradle/
+build/
+/local.properties
+/captures/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Keep the self-signed release keystore + keystore.properties IN the repo on purpose
+# (personal sideloaded app, DESIGN.md §3). Do NOT add them here.

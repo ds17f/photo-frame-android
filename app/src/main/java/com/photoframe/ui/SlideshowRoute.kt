@@ -1,5 +1,6 @@
 package com.photoframe.ui
 
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -14,11 +15,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.photoframe.ui.controls.SlideshowControls
@@ -49,6 +52,12 @@ fun SlideshowRoute(onExit: () -> Unit) {
 
     var screen by remember { mutableStateOf(Screen.SLIDESHOW) }
     val context = LocalContext.current
+
+    // Keep the engine's pairing axis in sync with the live screen orientation (DESIGN §8).
+    val orientation = LocalConfiguration.current.orientation
+    LaunchedEffect(orientation) {
+        slideshowVm.setScreenLandscape(orientation == Configuration.ORIENTATION_LANDSCAPE)
+    }
 
     when (screen) {
         Screen.SETTINGS -> {

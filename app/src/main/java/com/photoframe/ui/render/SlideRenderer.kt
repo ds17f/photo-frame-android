@@ -10,13 +10,16 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import android.content.res.Configuration
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -63,7 +67,7 @@ fun SlideRenderer(
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             when (current) {
                 is UiSlide.Single -> SinglePhoto(current.photo, settings)
-                is UiSlide.Pair -> PortraitPair(current.left, current.right)
+                is UiSlide.Pair -> PairSlide(current.left, current.right)
             }
         }
     }
@@ -122,24 +126,46 @@ private fun SinglePhoto(photo: UiPhoto, settings: DisplaySettings) {
     )
 }
 
+/**
+ * Two photos filling the screen's long axis: side-by-side (each fit to full height) when the
+ * frame is landscape, stacked (each fit to full width) when portrait — DESIGN §7/§8. The
+ * engine only produces a pair for the axis-appropriate orientation, so this just lays it out.
+ */
 @Composable
-private fun PortraitPair(left: UiPhoto, right: UiPhoto) {
+private fun PairSlide(first: UiPhoto, second: UiPhoto) {
     val context = LocalContext.current
-    BlurFillBackground(left.path)
-    Row(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        for (p in listOf(left, right)) {
-            Image(
-                painter = rememberAsyncImagePainter(
-                    ImageRequest.Builder(context).data(java.io.File(p.path)).crossfade(false).build(),
-                ),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxHeight(),
-            )
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    BlurFillBackground(first.path)
+
+    @Composable
+    fun photo(p: UiPhoto, itemModifier: Modifier) {
+        Image(
+            painter = rememberAsyncImagePainter(
+                ImageRequest.Builder(context).data(java.io.File(p.path)).crossfade(false).build(),
+            ),
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = itemModifier,
+        )
+    }
+
+    if (isLandscape) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            photo(first, Modifier.fillMaxHeight())
+            photo(second, Modifier.fillMaxHeight())
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            photo(first, Modifier.fillMaxWidth())
+            photo(second, Modifier.fillMaxWidth())
         }
     }
 }

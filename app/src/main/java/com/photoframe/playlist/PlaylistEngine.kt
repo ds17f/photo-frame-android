@@ -1,6 +1,7 @@
 package com.photoframe.playlist
 
 import com.photoframe.playlist.model.OrderMode
+import com.photoframe.playlist.model.Orientation
 import com.photoframe.playlist.model.PlaylistPhoto
 import com.photoframe.playlist.model.PortraitMode
 import com.photoframe.playlist.model.Slide
@@ -36,6 +37,11 @@ class PlaylistEngine(
     var recencyWindow: Duration = Duration.ofDays(7)
         private set
 
+    /** Orientation eligible for side-by-side/stacked pairing — perpendicular to the screen's
+     *  long axis. PORTRAIT on a landscape frame, LANDSCAPE on a portrait frame (DESIGN §8). */
+    var pairOrientation: Orientation = Orientation.PORTRAIT
+        private set
+
     val size: Int get() = all.size
     val isEmpty: Boolean get() = all.isEmpty()
 
@@ -45,11 +51,15 @@ class PlaylistEngine(
         orderMode: OrderMode = this.orderMode,
         portraitMode: PortraitMode = this.portraitMode,
         recencyWindow: Duration = this.recencyWindow,
+        pairOrientation: Orientation = this.pairOrientation,
     ) {
         val orderChanged = orderMode != this.orderMode || recencyWindow != this.recencyWindow
         this.orderMode = orderMode
         this.portraitMode = portraitMode
         this.recencyWindow = recencyWindow
+        // Pairing only affects how upcoming photos are grouped, not the draw order, so a
+        // screen-rotation change here must not disturb the current bag.
+        this.pairOrientation = pairOrientation
         if (orderChanged) startNewCycle()
     }
 
@@ -122,7 +132,7 @@ class PlaylistEngine(
         if (all.isEmpty()) return null
         if (remaining.isEmpty()) startNewCycle()
 
-        val slide = SlideBuilder.nextSlide(remaining, portraitMode) ?: return current()
+        val slide = SlideBuilder.nextSlide(remaining, portraitMode, pairOrientation) ?: return current()
         history.add(slide)
         historyIndex = history.lastIndex
         trimHistory()

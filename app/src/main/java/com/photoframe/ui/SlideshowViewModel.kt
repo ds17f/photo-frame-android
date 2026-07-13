@@ -9,6 +9,7 @@ import com.photoframe.data.db.PhotoEntity
 import com.photoframe.data.fixture.FixtureImporter
 import com.photoframe.data.toPlaylistPhoto
 import com.photoframe.playlist.PlaylistEngine
+import com.photoframe.playlist.model.Orientation
 import com.photoframe.playlist.model.Slide
 import com.photoframe.settings.DisplaySettings
 import com.photoframe.settings.DisplaySettingsRepository
@@ -89,6 +90,17 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.value = _uiState.value.copy(photoCount = entities.size, loading = false)
             if (!hadSlide && entities.isNotEmpty()) advance(forward = true)
         }.launchIn(viewModelScope)
+    }
+
+    /**
+     * Tell the engine which orientation is eligible for pairing based on the live screen
+     * orientation: portraits pair only on a landscape frame; on a portrait frame landscapes
+     * pair instead, so portraits are shown full-screen (never side-by-side) — DESIGN §8.
+     */
+    fun setScreenLandscape(isLandscape: Boolean) {
+        val pairOrientation = if (isLandscape) Orientation.PORTRAIT else Orientation.LANDSCAPE
+        if (pairOrientation == engine.pairOrientation) return
+        engine.updateConfig(pairOrientation = pairOrientation)
     }
 
     // ---- Playback controls ---------------------------------------------------------------

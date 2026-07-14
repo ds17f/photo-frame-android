@@ -26,6 +26,7 @@ fun SettingsHomeScreen(
     onSources: () -> Unit,
     onDisplay: () -> Unit,
     onSchedule: () -> Unit,
+    onStorage: () -> Unit,
     onCache: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
@@ -48,7 +49,9 @@ fun SettingsHomeScreen(
             Divider()
             SettingsRow("Schedule", "Quiet hours, boot start, power rules", onSchedule)
             Divider()
-            SettingsRow("Cache & sync", "Storage cap, sync interval, deletion policy", onCache)
+            SettingsRow("Storage", "Cache location (internal / SD card), cap, usage", onStorage)
+            Divider()
+            SettingsRow("Sync", "Sync interval, deletion policy, Wi-Fi only", onCache)
             Divider()
             SettingsRow("Diagnostics", "Sync log, cache usage", onDiagnostics)
         }

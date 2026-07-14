@@ -88,6 +88,14 @@ class PhotoPrefetcher(
         wake.trySend(Unit)
     }
 
+    /**
+     * Nudge the loop to re-evaluate its horizon now — e.g. after a location switch flipped the
+     * horizon photos back to INDEXED, so they should be re-fetched into the new location at once.
+     */
+    fun kick() {
+        wake.trySend(Unit)
+    }
+
     /** The set the evictor must not reclaim: horizon photos + in-flight downloads (as string keys). */
     suspend fun protectedKeys(): Set<String> = stateMutex.withLock {
         HashSet<String>(horizon.size + inFlight.size).apply {

@@ -29,14 +29,13 @@ import com.photoframe.data.source.DeletionPolicy
 import com.photoframe.settings.SyncSettings
 
 /**
- * Cache & sync settings (DESIGN §6/§11): storage cap, sync interval, deletion policy, network
- * constraint, plus a live cache-usage readout. Changes reschedule background sync.
+ * Sync settings (DESIGN §6/§11): sync interval, deletion policy, network constraint. The cache cap
+ * and location now live on the Storage screen (streaming-cache model). Changes reschedule sync.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncSettingsScreen(
     settings: SyncSettings,
-    cacheUsageBytes: Long,
     onBack: () -> Unit,
     onUpdate: ((SyncSettings) -> SyncSettings) -> Unit,
 ) {
@@ -68,26 +67,6 @@ fun SyncSettingsScreen(
                 )
                 Text(
                     "How often the frame checks Immich for new photos (min 15 min).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Divider()
-
-            // Cache cap — the retained-pool buffer size (the frame sees the whole library regardless).
-            Column {
-                Text("Cache cap: ${formatBytes(settings.cacheCapBytes)}", fontWeight = FontWeight.SemiBold)
-                val capGb = settings.cacheCapBytes / (1024.0 * 1024 * 1024)
-                Slider(
-                    value = capGb.toFloat(),
-                    onValueChange = { gb ->
-                        onUpdate { it.copy(cacheCapBytes = (gb.toDouble() * 1024 * 1024 * 1024).toLong()) }
-                    },
-                    valueRange = 0.25f..32f,
-                )
-                Text(
-                    "Using ${formatBytes(cacheUsageBytes)} of ${formatBytes(settings.cacheCapBytes)}. " +
-                        "A retained buffer of recently-shown photos — not a limit on how many photos the frame sees.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -134,9 +113,4 @@ fun SyncSettingsScreen(
             }
         }
     }
-}
-
-private fun formatBytes(bytes: Long): String {
-    val mb = bytes / (1024.0 * 1024)
-    return if (mb >= 1024) "%.1f GB".format(mb / 1024) else "%.0f MB".format(mb)
 }

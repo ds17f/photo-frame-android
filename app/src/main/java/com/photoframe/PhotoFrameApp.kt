@@ -33,6 +33,12 @@ class PhotoFrameApp : Application(), ImageLoaderFactory {
         // every warm launch would jank startup for no benefit; the periodic job keeps it fresh.
         appScope.launch {
             runCatching {
+                // Point the cache at the saved location BEFORE anything fetches, then reconcile the
+                // index with disk — repair rows whose files vanished while the app was off (e.g. the
+                // SD card was pulled). Reach lives in the index, so this just re-queues re-fetches.
+                container.cacheMaintainer.applyLocation(container.storageSettingsRepository.current().location)
+                container.cacheMaintainer.sweepMissingFiles()
+
                 val settings = container.syncSettingsRepository.current()
                 SyncScheduler.reschedule(this@PhotoFrameApp, settings)
                 val sources = container.sourceRepository.listEnabled()

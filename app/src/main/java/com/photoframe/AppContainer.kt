@@ -2,6 +2,7 @@ package com.photoframe
 
 import android.content.Context
 import com.photoframe.data.PhotoRepository
+import com.photoframe.data.cache.CacheMaintainer
 import com.photoframe.data.cache.PhotoCache
 import com.photoframe.data.db.PhotoFrameDatabase
 import com.photoframe.data.fixture.FixtureImporter
@@ -13,6 +14,7 @@ import com.photoframe.data.sync.PhotoSourceFactory
 import com.photoframe.data.sync.SyncManager
 import com.photoframe.settings.DisplaySettingsRepository
 import com.photoframe.settings.ScheduleSettingsRepository
+import com.photoframe.settings.StorageSettingsRepository
 import com.photoframe.settings.SyncSettingsRepository
 
 /**
@@ -32,6 +34,10 @@ class AppContainer(context: Context) {
     val photoSourceFactory: PhotoSourceFactory by lazy { PhotoSourceFactory(sourceRepository) }
 
     val cacheEvictor: CacheEvictor by lazy { CacheEvictor(database.photoDao()) }
+    val cacheMaintainer: CacheMaintainer by lazy { CacheMaintainer(database.photoDao(), cache) }
+    val storageSettingsRepository: StorageSettingsRepository by lazy {
+        StorageSettingsRepository(appContext)
+    }
 
     /**
      * Playback-side prefetcher (streaming-cache model): keeps the upcoming playlist horizon cached

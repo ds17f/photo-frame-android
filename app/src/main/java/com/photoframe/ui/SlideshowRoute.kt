@@ -45,13 +45,15 @@ import com.photoframe.ui.settings.DisplaySettingsScreen
 import com.photoframe.ui.settings.ScheduleSettingsScreen
 import com.photoframe.ui.settings.SettingsHomeScreen
 import com.photoframe.ui.settings.SettingsViewModel
+import com.photoframe.ui.settings.StorageSettingsScreen
+import com.photoframe.ui.settings.StorageViewModel
 import com.photoframe.ui.settings.SyncSettingsScreen
 import com.photoframe.ui.sources.FirstRunWelcome
 import com.photoframe.ui.sources.ImmichSetupScreen
 import com.photoframe.ui.sources.SourcesScreen
 import com.photoframe.ui.sources.SourcesViewModel
 
-private enum class Screen { SLIDESHOW, SETTINGS_HOME, DISPLAY, SCHEDULE, SOURCES, CACHE, DIAGNOSTICS }
+private enum class Screen { SLIDESHOW, SETTINGS_HOME, DISPLAY, SCHEDULE, SOURCES, STORAGE, CACHE, DIAGNOSTICS }
 
 /** Swipe distance (px) past which a horizontal drag counts as prev/next. */
 private const val SWIPE_THRESHOLD = 120f
@@ -180,6 +182,7 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onSources = { screen = Screen.SOURCES },
                 onDisplay = { screen = Screen.DISPLAY },
                 onSchedule = { screen = Screen.SCHEDULE },
+                onStorage = { screen = Screen.STORAGE },
                 onCache = { screen = Screen.CACHE },
                 onDiagnostics = { screen = Screen.DIAGNOSTICS },
             )
@@ -216,11 +219,26 @@ fun SlideshowRoute(onExit: () -> Unit) {
             )
         }
 
+        Screen.STORAGE -> {
+            val storageVm: StorageViewModel = viewModel()
+            val storageInfo by storageVm.info.collectAsState()
+            val storageSync by storageVm.syncSettings.collectAsState()
+            val storageUsage by storageVm.cacheUsageBytes.collectAsState()
+            BackHandler { screen = Screen.SETTINGS_HOME }
+            StorageSettingsScreen(
+                info = storageInfo,
+                settings = storageSync,
+                cacheUsageBytes = storageUsage,
+                onBack = { screen = Screen.SETTINGS_HOME },
+                onLocation = { storageVm.setLocation(it) },
+                onCap = { storageVm.setCap(it) },
+            )
+        }
+
         Screen.CACHE -> {
             BackHandler { screen = Screen.SETTINGS_HOME }
             SyncSettingsScreen(
                 settings = syncSettings,
-                cacheUsageBytes = cacheUsage,
                 onBack = { screen = Screen.SETTINGS_HOME },
                 onUpdate = { transform -> sourcesVm.updateSyncSettings(transform) },
             )

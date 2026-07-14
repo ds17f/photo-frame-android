@@ -1,5 +1,12 @@
 # kotlinx.serialization — keep @Serializable classes and their generated serializers.
 -keepattributes *Annotation*, InnerClasses
+
+# Fire OS 7 (API 28) has no java.lang.ClassValue (added API 33). kotlinx.serialization guards
+# this at runtime (Class.forName → ConcurrentHashMapCache fallback), but R8 full mode inlines/
+# merges ClassValueCache into the deserialization hot path, baking a raw ClassValue reference
+# into a class ART then fails to verify → NoClassDefFoundError every JSON parse. Keep these
+# classes intact so the reference stays isolated and the runtime guard actually works.
+-keep class kotlinx.serialization.internal.ClassValue** { *; }
 -dontnote kotlinx.serialization.**
 -keepclassmembers class **$$serializer { *; }
 -keepclasseswithmembers class * {

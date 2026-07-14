@@ -7,6 +7,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.HTTP
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.POST
 import retrofit2.http.Query
@@ -58,6 +59,13 @@ interface ImmichApi {
      */
     @HTTP(method = "DELETE", path = "api/assets", hasBody = true)
     suspend fun deleteAssets(@Body body: ImmichDeleteDto): Response<Unit>
+
+    /**
+     * Bulk-update assets (used to set isFavorite). Requires the `asset.update` permission on the
+     * API key (verified: 403 "Missing required permission: asset.update" otherwise).
+     */
+    @PUT("api/assets")
+    suspend fun updateAssets(@Body body: ImmichUpdateDto): Response<Unit>
 }
 
 @Serializable
@@ -65,6 +73,12 @@ data class ImmichDeleteDto(
     val ids: List<String>,
     /** false = trash (recoverable), true = permanent. The frame trashes. */
     val force: Boolean = false,
+)
+
+@Serializable
+data class ImmichUpdateDto(
+    val ids: List<String>,
+    val isFavorite: Boolean,
 )
 
 // ---- DTOs (only the fields the app uses; ignoreUnknownKeys tolerates the rest) --------------

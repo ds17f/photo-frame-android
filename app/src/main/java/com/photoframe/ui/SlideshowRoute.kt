@@ -7,7 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -91,7 +93,8 @@ fun SlideshowRoute(onExit: () -> Unit) {
     val setup by sourcesVm.setup.collectAsState()
 
     var screen by remember { mutableStateOf(Screen.SLIDESHOW) }
-    var pendingDelete by remember { mutableStateOf<UiPhoto?>(null) }
+    var menuPhoto by remember { mutableStateOf<UiPhoto?>(null) }      // long-press action menu
+    var confirmDelete by remember { mutableStateOf<UiPhoto?>(null) }  // delete confirmation
     val context = LocalContext.current
 
     // Surface one-shot messages (delete results) as toasts.
@@ -209,20 +212,45 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onPrevious = { slideshowVm.previous() },
                 onTogglePause = { slideshowVm.togglePause() },
                 onOpenSettings = { slideshowVm.hideControls(); screen = Screen.SETTINGS_HOME },
-                onRequestDelete = { pendingDelete = it },
+                onPhotoLongPress = { menuPhoto = it },
             )
-            pendingDelete?.let { photo ->
+
+            // Long-press action menu: favorite (immediate) or delete (→ confirm).
+            menuPhoto?.let { photo ->
                 AlertDialog(
-                    onDismissRequest = { pendingDelete = null },
+                    onDismissRequest = { menuPhoto = null },
+                    title = { Text("Photo actions") },
+                    text = {
+                        Column {
+                            TextButton(
+                                onClick = { slideshowVm.favoritePhoto(photo); menuPhoto = null },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Add to favorites") }
+                            TextButton(
+                                onClick = { confirmDelete = photo; menuPhoto = null },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Delete from Immich") }
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(onClick = { menuPhoto = null }) { Text("Cancel") }
+                    },
+                )
+            }
+
+            confirmDelete?.let { photo ->
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = null },
                     title = { Text("Delete this photo?") },
                     text = { Text("It will be moved to the Immich trash — you can restore it there.") },
                     confirmButton = {
-                        TextButton(onClick = { slideshowVm.deletePhoto(photo); pendingDelete = null }) {
+                        TextButton(onClick = { slideshowVm.deletePhoto(photo); confirmDelete = null }) {
                             Text("Delete")
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+                        TextButton(onClick = { confirmDelete = null }) { Text("Cancel") }
                     },
                 )
             }
@@ -266,7 +294,7 @@ private fun SlideshowContent(
     onPrevious: () -> Unit,
     onTogglePause: () -> Unit,
     onOpenSettings: () -> Unit,
-    onRequestDelete: (com.photoframe.ui.model.UiPhoto) -> Unit,
+    onPhotoLongPress: (UiPhoto) -> Unit,
 ) {
     val isLandscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -279,7 +307,7 @@ private fun SlideshowContent(
                     onTap = { onTap() },
                     // Long-press a photo (or one side of a split) to delete it (§11 extension).
                     onLongPress = { offset ->
-                        pickPhotoAt(state.slide, offset, size, isLandscape)?.let(onRequestDelete)
+                        pickPhotoAt(state.slide, offset, size, isLandscape)?.let(onPhotoLongPress)
                     },
                 )
             }

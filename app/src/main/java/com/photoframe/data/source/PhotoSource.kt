@@ -34,6 +34,16 @@ interface PhotoSource {
      */
     suspend fun deleteRemote(remoteId: String): Unit =
         throw UnsupportedOperationException("This source can't delete photos")
+
+    /** Whether this source supports marking a remote asset as a favorite. */
+    val canFavorite: Boolean get() = false
+
+    /**
+     * Mark [remoteId] as a favorite at the source (default: unsupported → throws). Throws with a
+     * user-facing message on failure (e.g. a missing `asset.update` permission).
+     */
+    suspend fun favoriteRemote(remoteId: String): Unit =
+        throw UnsupportedOperationException("This source can't favorite photos")
 }
 
 /**

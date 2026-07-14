@@ -152,6 +152,24 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Mark a photo as a favorite at its source (Immich). Surfaces the result via [events]. */
+    fun favoritePhoto(photo: UiPhoto) {
+        val entity = photoIndex[photo.id] ?: return
+        viewModelScope.launch {
+            val configured = sourceRepository.byId(entity.sourceId)
+            val source = configured?.let { photoSourceFactory.create(it) }
+            if (source == null || !source.canFavorite) {
+                _events.send("This source can't favorite photos")
+                return@launch
+            }
+            val result = runCatching { source.favoriteRemote(entity.remoteId) }
+            _events.send(
+                if (result.isSuccess) "Added to favorites"
+                else result.exceptionOrNull()?.message ?: "Favorite failed",
+            )
+        }
+    }
+
     private fun currentSlideContains(id: String): Boolean = when (val s = _uiState.value.slide) {
         is UiSlide.Single -> s.photo.id == id
         is UiSlide.Pair -> s.left.id == id || s.right.id == id

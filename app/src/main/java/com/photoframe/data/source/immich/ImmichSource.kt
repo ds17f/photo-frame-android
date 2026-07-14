@@ -103,6 +103,17 @@ class ImmichSource(
         }
     }
 
+    override val canFavorite: Boolean get() = true
+
+    /** Mark the asset as a favorite in Immich. Throws with a clear message on failure. */
+    override suspend fun favoriteRemote(remoteId: String) {
+        val response = api.updateAssets(ImmichUpdateDto(ids = listOf(remoteId), isFavorite = true))
+        if (!response.isSuccessful) {
+            val hint = if (response.code() == 403) " — API key needs the asset.update permission" else ""
+            error("Favorite failed (HTTP ${response.code()})$hint")
+        }
+    }
+
     /**
      * Page through metadata search (newest-first), filtering to displayable images. Bounded by
      * [MAX_LIST_ITEMS] so a huge whole-library selection (the owner's is ~60k) doesn't hold the

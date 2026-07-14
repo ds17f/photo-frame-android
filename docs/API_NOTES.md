@@ -29,7 +29,9 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
 
 | Purpose | Method + path | Result |
 |---|---|---|
-| Connection + auth test | `GET /api/users/me` | ✅ 200 (id/email/name). Used for test-connection. |
+| Connection + auth test | `GET /api/albums` | ✅ Used for test-connection. NOT `/api/users/me` — that needs the unrelated `user.read` permission (403 without it); `/api/albums` needs only `album.read`, which the app requires anyway. |
+| Delete (trash) | `DELETE /api/assets` `{ids,force:false}` | needs `asset.delete`. Long-press → delete. |
+| Favorite | `PUT /api/assets` `{ids,isFavorite:true}` | needs `asset.update`. Long-press → add to favorites. |
 | List albums | `GET /api/albums` | ✅ summaries (`id`, `albumName`, `assetCount`). |
 | Recognized people | `GET /api/people?withHidden&page&size` | ✅ `{people:[{id,name,thumbnailPath}], total, hasNextPage}`. **Pages at 500.** |
 | Metadata search | `POST /api/search/metadata` | ✅ Backs albums + people + favorites + window. |

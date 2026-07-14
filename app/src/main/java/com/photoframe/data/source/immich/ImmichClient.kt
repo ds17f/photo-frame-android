@@ -1,10 +1,13 @@
 package com.photoframe.data.source.immich
 
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import retrofit2.HttpException
 import retrofit2.Retrofit
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
 
 /**
@@ -38,6 +41,18 @@ object ImmichClient {
         // Tolerate the user pasting the ".../api" root: paths already include `api/`.
         if (url.endsWith("/api")) url = url.removeSuffix("/api")
         return "$url/"
+    }
+
+    /** Human-readable message from a failed Immich call — prefers the server's `{"message":...}`. */
+    fun errorMessage(e: HttpException): String {
+        val serverMsg = runCatching {
+            e.response()?.errorBody()?.string()
+                ?.let { json.parseToJsonElement(it).jsonObject["message"]?.jsonPrimitive?.content }
+        }.getOrNull()
+        return serverMsg ?: when (e.code()) {
+            401, 403 -> "API key rejected (HTTP ${e.code()})"
+            else -> "Server returned HTTP ${e.code()}"
+        }
     }
 
     fun create(baseUrl: String, apiKey: String): ImmichApi {

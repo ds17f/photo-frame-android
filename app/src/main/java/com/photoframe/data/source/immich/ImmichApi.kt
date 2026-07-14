@@ -24,11 +24,11 @@ import retrofit2.http.Streaming
  */
 interface ImmichApi {
 
-    /** Current user — doubles as the connection/auth test (200 = reachable + key valid). */
-    @GET("api/users/me")
-    suspend fun me(): Response<ImmichUserDto>
-
-    /** Albums (summaries only; assets come from [searchMetadata] with `albumIds`). */
+    /**
+     * Albums (summaries only; assets come from [searchMetadata] with `albumIds`). Also serves as
+     * the connection/auth test — it needs only `album.read` (which the app requires anyway), unlike
+     * `/api/users/me` which requires the unrelated `user.read` permission.
+     */
     @GET("api/albums")
     suspend fun albums(): List<ImmichAlbumDto>
 
@@ -82,13 +82,6 @@ data class ImmichUpdateDto(
 )
 
 // ---- DTOs (only the fields the app uses; ignoreUnknownKeys tolerates the rest) --------------
-
-@Serializable
-data class ImmichUserDto(
-    val id: String? = null,
-    val email: String? = null,
-    val name: String? = null,
-)
 
 @Serializable
 data class ImmichAlbumDto(

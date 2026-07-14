@@ -7,6 +7,7 @@ import com.photoframe.data.source.RemotePhoto
 import com.photoframe.data.source.Sink
 import com.photoframe.data.source.SourceHealth
 import kotlinx.coroutines.CancellationException
+import retrofit2.HttpException
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -29,15 +30,12 @@ class ImmichSource(
 
     override suspend fun healthCheck(): SourceHealth {
         return try {
-            val res = api.me()
-            when {
-                res.isSuccessful -> SourceHealth.OK
-                res.code() == 401 || res.code() == 403 ->
-                    SourceHealth.degraded("API key rejected (HTTP ${res.code()})")
-                else -> SourceHealth.degraded("Server returned HTTP ${res.code()}")
-            }
+            api.albums() // validates reachability + key without needing the user.read permission
+            SourceHealth.OK
         } catch (e: CancellationException) {
             throw e
+        } catch (e: HttpException) {
+            SourceHealth.degraded(ImmichClient.errorMessage(e))
         } catch (e: Exception) {
             SourceHealth.offline(e.message ?: "Could not reach Immich server")
         }

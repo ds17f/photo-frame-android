@@ -2,6 +2,7 @@ package com.photoframe.data.source.immich
 
 import com.photoframe.data.source.SourceHealth
 import kotlinx.coroutines.CancellationException
+import retrofit2.HttpException
 
 /**
  * Read-only Immich queries used by the source-setup UI *before* a source is saved (DESIGN §5.1):
@@ -12,15 +13,12 @@ class ImmichCatalog(private val api: ImmichApi) {
 
     suspend fun testConnection(): SourceHealth {
         return try {
-            val res = api.me()
-            when {
-                res.isSuccessful -> SourceHealth.OK
-                res.code() == 401 || res.code() == 403 ->
-                    SourceHealth.degraded("API key rejected (HTTP ${res.code()})")
-                else -> SourceHealth.degraded("Server returned HTTP ${res.code()}")
-            }
+            api.albums() // authenticated: validates reachability + key + the album.read setup needs
+            SourceHealth.OK
         } catch (e: CancellationException) {
             throw e
+        } catch (e: HttpException) {
+            SourceHealth.degraded(ImmichClient.errorMessage(e))
         } catch (e: Exception) {
             SourceHealth.offline(e.message ?: "Could not reach server")
         }

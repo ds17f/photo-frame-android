@@ -22,6 +22,19 @@ interface PhotoDao {
     @Query("SELECT remoteId FROM photos WHERE sourceId = :sourceId")
     suspend fun remoteIdsForSource(sourceId: String): List<String>
 
+    @Query("SELECT * FROM photos WHERE sourceId = :sourceId")
+    suspend fun listBySource(sourceId: String): List<PhotoEntity>
+
+    @Query("SELECT COUNT(*) FROM photos WHERE sourceId = :sourceId AND status = :status")
+    suspend fun countForSource(sourceId: String, status: String = "READY"): Int
+
+    /** Total bytes of cached photos, from the index (cheaper than walking the disk). */
+    @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM photos")
+    suspend fun totalBytes(): Long
+
+    @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM photos")
+    fun observeTotalBytes(): kotlinx.coroutines.flow.Flow<Long>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(photos: List<PhotoEntity>)
 

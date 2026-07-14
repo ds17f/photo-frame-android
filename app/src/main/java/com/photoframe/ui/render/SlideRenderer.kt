@@ -3,6 +3,8 @@ package com.photoframe.ui.render
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -23,10 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,7 +41,6 @@ import com.photoframe.settings.DisplaySettings
 import com.photoframe.settings.Transition
 import com.photoframe.ui.model.UiPhoto
 import com.photoframe.ui.model.UiSlide
-import kotlinx.coroutines.delay
 import kotlin.random.Random
 
 /**
@@ -91,18 +89,16 @@ private fun SinglePhoto(photo: UiPhoto, settings: DisplaySettings) {
     val context = LocalContext.current
     BlurFillBackground(photo.path)
 
-    // A fresh Ken Burns path per photo; progresses 0→1 over the display interval.
+    // A fresh Ken Burns path per photo, driven by an Animatable so it interpolates on the frame
+    // clock (~60fps). The old version stepped `progress` in 60 discrete `delay()` chunks — on a
+    // 30s interval that's one update every 500ms (~2fps), which read as choppy.
     val spec = remember(photo.id) { KenBurnsSpec.generate(Random(photo.id.hashCode())) }
-    var progress by remember(photo.id) { mutableFloatStateOf(0f) }
+    val progress = remember(photo.id) { Animatable(0f) }
     LaunchedEffect(photo.id, settings.kenBurnsEnabled, settings.intervalSeconds) {
-        if (!settings.kenBurnsEnabled) { progress = 0f; return@LaunchedEffect }
-        val steps = 60
-        val total = settings.intervalSeconds.coerceAtLeast(1) * 1000L
-        val stepMs = (total / steps).coerceAtLeast(16L)
-        for (i in 0..steps) {
-            progress = i / steps.toFloat()
-            delay(stepMs)
-        }
+        progress.snapTo(0f)
+        if (!settings.kenBurnsEnabled) return@LaunchedEffect
+        val totalMs = settings.intervalSeconds.coerceAtLeast(1) * 1000
+        progress.animateTo(1f, animationSpec = tween(durationMillis = totalMs, easing = LinearEasing))
     }
 
     val painter = rememberAsyncImagePainter(
@@ -116,11 +112,12 @@ private fun SinglePhoto(photo: UiPhoto, settings: DisplaySettings) {
             .fillMaxSize()
             .graphicsLayer {
                 if (settings.kenBurnsEnabled) {
-                    val s = spec.scaleAt(progress)
+                    val p = progress.value
+                    val s = spec.scaleAt(p)
                     scaleX = s
                     scaleY = s
-                    translationX = spec.transXAt(progress) * size.width
-                    translationY = spec.transYAt(progress) * size.height
+                    translationX = spec.transXAt(p) * size.width
+                    translationY = spec.transYAt(p) * size.height
                 }
             },
     )

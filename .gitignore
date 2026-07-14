@@ -10,5 +10,9 @@ build/
 *.iml
 .DS_Store
 
+# Local secrets — real values live in .env (never committed); .env.example is the template.
+.env
+.env.local
+
 # Keep the self-signed release keystore + keystore.properties IN the repo on purpose
 # (personal sideloaded app, DESIGN.md §3). Do NOT add them here.

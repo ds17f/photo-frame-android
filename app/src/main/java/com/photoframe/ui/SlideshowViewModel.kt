@@ -58,9 +58,10 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private var controlsHideJob: Job? = null
 
     init {
-        // Seed fixtures (idempotent upsert) then react to the cache + settings.
+        // Seed fixtures only in debug builds — a release "fresh install" must start empty so the
+        // first-run wizard (Phase 2) drives the user to add a real Immich source (PLAN accept).
         viewModelScope.launch {
-            runCatching { fixtureImporter.importAll() }
+            if (com.photoframe.BuildConfig.DEBUG) runCatching { fixtureImporter.importAll() }
             observeSettings()
             observePhotos()
             restartAdvanceLoop()

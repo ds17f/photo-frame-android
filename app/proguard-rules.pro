@@ -22,6 +22,10 @@
 # AppAuth
 -keep class net.openid.appauth.** { *; }
 
+# security-crypto → Tink references compile-only errorprone annotations that aren't on the
+# runtime classpath. Safe to ignore (annotations only).
+-dontwarn com.google.errorprone.annotations.**
+
 # ViewModels are instantiated reflectively by ViewModelProvider (it looks up the
 # (Application) constructor for AndroidViewModel). Keep those constructors so the minified
 # release build doesn't crash on launch.

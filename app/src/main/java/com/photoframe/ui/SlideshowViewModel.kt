@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.photoframe.PhotoFrameApp
 import com.photoframe.data.PhotoRepository
 import com.photoframe.data.db.PhotoEntity
+import com.photoframe.data.db.PhotoRef
 import com.photoframe.data.fixture.FixtureImporter
 import com.photoframe.data.toPlaylistPhoto
 import com.photoframe.playlist.PlaylistEngine
@@ -59,13 +60,15 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
 
     private val engine = PlaylistEngine()
 
-    /** id (sourceId/remoteId) -> entity, for projecting engine slides into UI slides. */
-    private var photoIndex: Map<String, PhotoEntity> = emptyMap()
+    /** id (sourceId/remoteId) -> lightweight ref, for projecting engine slides into UI slides.
+     *  The heavy fields (localPath, caption) are fetched per on-screen photo via the repository. */
+    private var photoIndex: Map<String, PhotoRef> = emptyMap()
 
     private val _uiState = MutableStateFlow(SlideshowUiState())
     val uiState: StateFlow<SlideshowUiState> = _uiState.asStateFlow()
 
     private var advanceJob: Job? = null
+    private var slideJob: Job? = null
     private var controlsHideJob: Job? = null
 
     init {
@@ -95,12 +98,12 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun observePhotos() {
-        photoRepository.observeReadyPhotos().onEach { entities ->
-            photoIndex = entities.associateBy { it.key }
-            engine.setPhotos(entities.map { it.toPlaylistPhoto() })
+        photoRepository.observeReadyPhotos().onEach { refs ->
+            photoIndex = refs.associateBy { it.key }
+            engine.setPhotos(refs.map { it.toPlaylistPhoto() })
             val hadSlide = _uiState.value.slide != null
-            _uiState.value = _uiState.value.copy(photoCount = entities.size, loading = false)
-            if (!hadSlide && entities.isNotEmpty()) advance(forward = true)
+            _uiState.value = _uiState.value.copy(photoCount = refs.size, loading = false)
+            if (!hadSlide && refs.isNotEmpty()) advance(forward = true)
         }.launchIn(viewModelScope)
     }
 
@@ -137,18 +140,22 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
      * then drop it from the local cache and advance off it. Surfaces the result via [events].
      */
     fun deletePhoto(photo: UiPhoto) {
-        val entity = photoIndex[photo.id] ?: return
+        val ref = photoIndex[photo.id] ?: return
         viewModelScope.launch {
-            val configured = sourceRepository.byId(entity.sourceId)
+            val configured = sourceRepository.byId(ref.sourceId)
             val source = configured?.let { photoSourceFactory.create(it) }
             if (source == null || !source.canDelete) {
                 _events.send("This source can't delete photos")
                 return@launch
             }
-            val result = runCatching { source.deleteRemote(entity.remoteId) }
+            val result = runCatching { source.deleteRemote(ref.remoteId) }
             if (result.isSuccess) {
-                withContext(Dispatchers.IO) { runCatching { File(entity.localPath).delete() } }
-                photoRepository.deleteFromSource(entity.sourceId, listOf(entity.remoteId))
+                // Grab the cache path before dropping the row, then delete the file off the DB row.
+                val localPath = photoRepository.photoByKey(ref.sourceId, ref.remoteId)?.localPath
+                if (localPath != null) {
+                    withContext(Dispatchers.IO) { runCatching { File(localPath).delete() } }
+                }
+                photoRepository.deleteFromSource(ref.sourceId, listOf(ref.remoteId))
                 if (currentSlideContains(photo.id)) advance(forward = true)
                 _events.send("Moved to Immich trash")
             } else {
@@ -159,15 +166,15 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Mark a photo as a favorite at its source (Immich). Surfaces the result via [events]. */
     fun favoritePhoto(photo: UiPhoto) {
-        val entity = photoIndex[photo.id] ?: return
+        val ref = photoIndex[photo.id] ?: return
         viewModelScope.launch {
-            val configured = sourceRepository.byId(entity.sourceId)
+            val configured = sourceRepository.byId(ref.sourceId)
             val source = configured?.let { photoSourceFactory.create(it) }
             if (source == null || !source.canFavorite) {
                 _events.send("This source can't favorite photos")
                 return@launch
             }
-            val result = runCatching { source.favoriteRemote(entity.remoteId) }
+            val result = runCatching { source.favoriteRemote(ref.remoteId) }
             _events.send(
                 if (result.isSuccess) "Added to favorites"
                 else result.exceptionOrNull()?.message ?: "Favorite failed",
@@ -196,10 +203,16 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun advance(forward: Boolean) {
-        val slide = if (forward) engine.next() else engine.previous()
-        val ui = slide?.let(::toUiSlide) ?: return
-        _uiState.value = _uiState.value.copy(slide = ui)
-        markShown(slide)
+        val slide = (if (forward) engine.next() else engine.previous()) ?: return
+        // Resolving the slide's photos now hits the DB (heavy fields are fetched per photo), so do
+        // it off the main thread. Cancel any in-flight resolution so the latest advance wins and
+        // rapid advances can't render out of order.
+        slideJob?.cancel()
+        slideJob = viewModelScope.launch {
+            val ui = toUiSlide(slide) ?: return@launch
+            _uiState.value = _uiState.value.copy(slide = ui)
+            markShown(slide)
+        }
     }
 
     private fun restartAdvanceLoop() {
@@ -218,18 +231,24 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         viewModelScope.launch {
             slide.photos.forEach { p ->
-                photoIndex[p.id]?.let { photoRepository.markShown(it, now) }
+                photoIndex[p.id]?.let { photoRepository.markShown(it.sourceId, it.remoteId, now) }
             }
         }
     }
 
-    private fun toUiSlide(slide: Slide): UiSlide? = when (slide) {
-        is Slide.Single -> photoIndex[slide.photo.id]?.let { UiSlide.Single(it.toUiPhoto()) }
+    private suspend fun toUiSlide(slide: Slide): UiSlide? = when (slide) {
+        is Slide.Single -> uiPhoto(slide.photo.id)?.let { UiSlide.Single(it) }
         is Slide.Pair -> {
-            val l = photoIndex[slide.left.id]?.toUiPhoto()
-            val r = photoIndex[slide.right.id]?.toUiPhoto()
+            val l = uiPhoto(slide.left.id)
+            val r = uiPhoto(slide.right.id)
             if (l != null && r != null) UiSlide.Pair(l, r) else l?.let { UiSlide.Single(it) }
         }
+    }
+
+    /** Resolve a playlist id into a displayable [UiPhoto], loading the heavy fields on demand. */
+    private suspend fun uiPhoto(id: String): UiPhoto? {
+        val ref = photoIndex[id] ?: return null
+        return photoRepository.photoByKey(ref.sourceId, ref.remoteId)?.toUiPhoto()
     }
 
     private fun PhotoEntity.toUiPhoto(): UiPhoto {

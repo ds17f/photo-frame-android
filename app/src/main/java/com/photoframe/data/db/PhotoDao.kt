@@ -9,12 +9,20 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PhotoDao {
 
-    /** All displayable photos, observed live so the playlist reacts to sync changes. */
-    @Query("SELECT * FROM photos WHERE status = :status ORDER BY addedAt DESC")
-    fun observeByStatus(status: String = "READY"): Flow<List<PhotoEntity>>
+    /**
+     * All displayable photos, observed live so the playlist reacts to sync changes. Projects to
+     * the lightweight [PhotoRef] — selecting full rows here overflows the 2 MB CursorWindow on a
+     * large cache and crashes the read (see [PhotoRef]).
+     */
+    @Query(
+        "SELECT sourceId, remoteId, width, height, takenAt, addedAt FROM photos " +
+            "WHERE status = :status ORDER BY addedAt DESC",
+    )
+    fun observeRefsByStatus(status: String = "READY"): Flow<List<PhotoRef>>
 
-    @Query("SELECT * FROM photos WHERE status = :status")
-    suspend fun listByStatus(status: String = "READY"): List<PhotoEntity>
+    /** Full row for a single photo, by primary key — used to resolve the on-screen slide. */
+    @Query("SELECT * FROM photos WHERE sourceId = :sourceId AND remoteId = :remoteId")
+    suspend fun getByKey(sourceId: String, remoteId: String): PhotoEntity?
 
     @Query("SELECT COUNT(*) FROM photos WHERE status = :status")
     fun observeCount(status: String = "READY"): Flow<Int>

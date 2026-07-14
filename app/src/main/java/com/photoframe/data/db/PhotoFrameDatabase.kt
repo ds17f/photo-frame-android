@@ -19,9 +19,6 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
 
     companion object {
-        /** On-disk filename; also referenced by the crash self-heal to drop a corrupt cache. */
-        const val NAME = "photoframe.db"
-
         @Volatile private var instance: PhotoFrameDatabase? = null
 
         fun get(context: Context): PhotoFrameDatabase =
@@ -29,7 +26,7 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     PhotoFrameDatabase::class.java,
-                    NAME,
+                    "photoframe.db",
                 ).fallbackToDestructiveMigration().build().also { instance = it }
             }
     }

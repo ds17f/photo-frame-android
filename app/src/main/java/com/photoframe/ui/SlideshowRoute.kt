@@ -8,8 +8,12 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +42,7 @@ import com.photoframe.ui.model.UiPhoto
 import com.photoframe.ui.model.UiSlide
 import com.photoframe.ui.render.SlideRenderer
 import com.photoframe.ui.settings.DisplaySettingsScreen
+import com.photoframe.ui.settings.ScheduleSettingsScreen
 import com.photoframe.ui.settings.SettingsHomeScreen
 import com.photoframe.ui.settings.SettingsViewModel
 import com.photoframe.ui.settings.SyncSettingsScreen
@@ -46,10 +51,36 @@ import com.photoframe.ui.sources.ImmichSetupScreen
 import com.photoframe.ui.sources.SourcesScreen
 import com.photoframe.ui.sources.SourcesViewModel
 
-private enum class Screen { SLIDESHOW, SETTINGS_HOME, DISPLAY, SOURCES, CACHE, DIAGNOSTICS }
+private enum class Screen { SLIDESHOW, SETTINGS_HOME, DISPLAY, SCHEDULE, SOURCES, CACHE, DIAGNOSTICS }
 
 /** Swipe distance (px) past which a horizontal drag counts as prev/next. */
 private const val SWIPE_THRESHOLD = 120f
+
+/** A small preview of the exact photo an action targets, so a pair's halves aren't confused. */
+@Composable
+private fun PhotoThumb(path: String) {
+    coil.compose.AsyncImage(
+        model = coil.request.ImageRequest.Builder(LocalContext.current)
+            .data(java.io.File(path))
+            .crossfade(false)
+            .build(),
+        contentDescription = null,
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        modifier = Modifier
+            .heightIn(max = 160.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)),
+    )
+}
+
+/** Unwrap the hosting Activity from a Compose context (for window brightness control). */
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var c: android.content.Context? = this
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
 
 /**
  * Which photo sits under a long-press: the single photo, or the correct half of a split (left/
@@ -82,9 +113,11 @@ fun SlideshowRoute(onExit: () -> Unit) {
     val slideshowVm: SlideshowViewModel = viewModel()
     val settingsVm: SettingsViewModel = viewModel()
     val sourcesVm: SourcesViewModel = viewModel()
+    val powerVm: PowerViewModel = viewModel()
 
     val state by slideshowVm.uiState.collectAsState()
     val settings by settingsVm.settings.collectAsState()
+    val schedule by settingsVm.schedule.collectAsState()
     val sources by sourcesVm.sources.collectAsState()
     val syncSettings by sourcesVm.syncSettings.collectAsState()
     val syncLog by sourcesVm.syncLog.collectAsState()
@@ -146,6 +179,7 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onBack = { screen = Screen.SLIDESHOW },
                 onSources = { screen = Screen.SOURCES },
                 onDisplay = { screen = Screen.DISPLAY },
+                onSchedule = { screen = Screen.SCHEDULE },
                 onCache = { screen = Screen.CACHE },
                 onDiagnostics = { screen = Screen.DIAGNOSTICS },
             )
@@ -156,6 +190,15 @@ fun SlideshowRoute(onExit: () -> Unit) {
             DisplaySettingsScreen(
                 settings = settings,
                 onUpdate = { transform -> settingsVm.update(transform) },
+                onBack = { screen = Screen.SETTINGS_HOME },
+            )
+        }
+
+        Screen.SCHEDULE -> {
+            BackHandler { screen = Screen.SETTINGS_HOME }
+            ScheduleSettingsScreen(
+                settings = schedule,
+                onUpdate = { transform -> settingsVm.updateSchedule(transform) },
                 onBack = { screen = Screen.SETTINGS_HOME },
             )
         }
@@ -194,6 +237,37 @@ fun SlideshowRoute(onExit: () -> Unit) {
         }
 
         Screen.SLIDESHOW -> {
+            val power by powerVm.state.collectAsState()
+
+            // Drive the fake-off: pause advancing + drop window brightness to minimum (§10).
+            LaunchedEffect(power.asleep) { slideshowVm.setAsleep(power.asleep) }
+            val activity = context.findActivity()
+            LaunchedEffect(power.asleep, activity) {
+                activity?.window?.let { w ->
+                    w.attributes = w.attributes.apply {
+                        screenBrightness = if (power.asleep) {
+                            0f // minimum — reads as off in a dark room (DESIGN §10)
+                        } else {
+                            android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                        }
+                    }
+                }
+            }
+
+            if (power.asleep) {
+                // Any tap (or back) wakes the frame for 5 minutes.
+                BackHandler { powerVm.wakeTemporarily() }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .pointerInput(Unit) {
+                            detectTapGestures { powerVm.wakeTemporarily() }
+                        },
+                )
+                return
+            }
+
             // First back shows controls; a second back while they're visible exits (§11).
             BackHandler {
                 if (state.controlsVisible) {
@@ -221,7 +295,9 @@ fun SlideshowRoute(onExit: () -> Unit) {
                     onDismissRequest = { menuPhoto = null },
                     title = { Text("Photo actions") },
                     text = {
-                        Column {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            PhotoThumb(photo.path) // the exact photo being acted on
+                            Spacer(Modifier.height(12.dp))
                             TextButton(
                                 onClick = { slideshowVm.favoritePhoto(photo); menuPhoto = null },
                                 modifier = Modifier.fillMaxWidth(),
@@ -243,7 +319,13 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 AlertDialog(
                     onDismissRequest = { confirmDelete = null },
                     title = { Text("Delete this photo?") },
-                    text = { Text("It will be moved to the Immich trash — you can restore it there.") },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            PhotoThumb(photo.path)
+                            Spacer(Modifier.height(12.dp))
+                            Text("This one photo moves to the Immich trash — you can restore it there. Its pair partner is not affected.")
+                        }
+                    },
                     confirmButton = {
                         TextButton(onClick = { slideshowVm.deletePhoto(photo); confirmDelete = null }) {
                             Text("Delete")

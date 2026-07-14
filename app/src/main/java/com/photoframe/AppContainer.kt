@@ -10,6 +10,7 @@ import com.photoframe.data.source.SourceRepository
 import com.photoframe.data.sync.PhotoSourceFactory
 import com.photoframe.data.sync.SyncManager
 import com.photoframe.settings.DisplaySettingsRepository
+import com.photoframe.settings.ScheduleSettingsRepository
 import com.photoframe.settings.SyncSettingsRepository
 
 /**
@@ -36,6 +37,9 @@ class AppContainer(context: Context) {
     val syncSettingsRepository: SyncSettingsRepository by lazy {
         SyncSettingsRepository(appContext)
     }
+    val scheduleSettingsRepository: ScheduleSettingsRepository by lazy {
+        ScheduleSettingsRepository(appContext)
+    }
     val syncManager: SyncManager by lazy {
         SyncManager(
             sourceRepository = sourceRepository,
@@ -43,6 +47,7 @@ class AppContainer(context: Context) {
             syncLogDao = database.syncLogDao(),
             cache = cache,
             syncSettingsRepository = syncSettingsRepository,
+            scheduleSettingsRepository = scheduleSettingsRepository,
         )
     }
 }

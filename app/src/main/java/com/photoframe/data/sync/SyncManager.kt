@@ -7,8 +7,11 @@ import com.photoframe.data.db.SyncLogDao
 import com.photoframe.data.db.SyncLogEntity
 import com.photoframe.data.source.ConfiguredSource
 import com.photoframe.data.source.SourceRepository
+import com.photoframe.settings.QuietHours
+import com.photoframe.settings.ScheduleSettingsRepository
 import com.photoframe.settings.SyncSettingsRepository
 import kotlinx.coroutines.CancellationException
+import java.time.LocalTime
 
 /** Roll-up of a full sync pass, for the caller (worker / sync-now button). */
 data class SyncSummary(
@@ -30,12 +33,21 @@ class SyncManager(
     private val syncLogDao: SyncLogDao,
     private val cache: PhotoCache,
     private val syncSettingsRepository: SyncSettingsRepository,
+    private val scheduleSettingsRepository: ScheduleSettingsRepository,
 ) {
     private val factory = PhotoSourceFactory(sourceRepository)
     private val syncer = SourceSyncer(photoDao, cache)
     private val evictor = CacheEvictor(photoDao)
 
-    suspend fun syncAll(): SyncSummary {
+    /**
+     * @param respectQuietHours when true (the periodic job), skip syncing during quiet hours
+     *   (§10). A manual "Sync now" passes false so it always runs.
+     */
+    suspend fun syncAll(respectQuietHours: Boolean = true): SyncSummary {
+        if (respectQuietHours && QuietHours.isQuiet(LocalTime.now(), scheduleSettingsRepository.current())) {
+            log(null, SyncLogEntity.Level.INFO, "Sync skipped — quiet hours")
+            return SyncSummary(0, 0, 0, 0)
+        }
         val settings = syncSettingsRepository.current()
         val sources = sourceRepository.listEnabled()
         var downloaded = 0

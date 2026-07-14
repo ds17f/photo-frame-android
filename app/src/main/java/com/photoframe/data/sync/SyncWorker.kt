@@ -18,8 +18,9 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as PhotoFrameApp).container
+        val respectQuietHours = inputData.getBoolean(KEY_RESPECT_QUIET, true)
         return try {
-            val summary = container.syncManager.syncAll()
+            val summary = container.syncManager.syncAll(respectQuietHours = respectQuietHours)
             Log.i(TAG, "Sync complete: $summary")
             Result.success()
         } catch (e: Exception) {
@@ -31,5 +32,8 @@ class SyncWorker(
     companion object {
         private const val TAG = "SyncWorker"
         private const val MAX_ATTEMPTS = 3
+
+        /** Input flag: periodic runs respect quiet hours; a manual "Sync now" sets this false. */
+        const val KEY_RESPECT_QUIET = "respect_quiet_hours"
     }
 }

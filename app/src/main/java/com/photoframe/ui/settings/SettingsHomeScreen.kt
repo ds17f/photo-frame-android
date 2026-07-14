@@ -25,6 +25,7 @@ fun SettingsHomeScreen(
     onBack: () -> Unit,
     onSources: () -> Unit,
     onDisplay: () -> Unit,
+    onSchedule: () -> Unit,
     onCache: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
@@ -44,6 +45,8 @@ fun SettingsHomeScreen(
             SettingsRow("Photo sources", "Immich servers, health, sync now", onSources)
             Divider()
             SettingsRow("Display", "Interval, transitions, Ken Burns, overlays", onDisplay)
+            Divider()
+            SettingsRow("Schedule", "Quiet hours, boot start, power rules", onSchedule)
             Divider()
             SettingsRow("Cache & sync", "Storage cap, sync interval, deletion policy", onCache)
             Divider()

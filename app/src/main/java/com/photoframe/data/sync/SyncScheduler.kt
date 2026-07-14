@@ -9,6 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.photoframe.settings.SyncSettings
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -29,6 +30,7 @@ object SyncScheduler {
             .toLong()
         val request = PeriodicWorkRequestBuilder<SyncWorker>(interval, TimeUnit.MINUTES)
             .setConstraints(constraints(settings))
+            .setInputData(workDataOf(SyncWorker.KEY_RESPECT_QUIET to true)) // periodic pauses at night
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofMinutes(5))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -43,6 +45,7 @@ object SyncScheduler {
     fun syncNow(context: Context) {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(Constraints.NONE) // user-initiated: run regardless of network metering
+            .setInputData(workDataOf(SyncWorker.KEY_RESPECT_QUIET to false)) // manual: always run
             .build()
         WorkManager.getInstance(context)
             .enqueueUniqueWork(ONESHOT_WORK, ExistingWorkPolicy.REPLACE, request)

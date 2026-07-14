@@ -121,6 +121,11 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
 
     fun previous() { advance(forward = false); restartAdvanceLoop() }
 
+    /** Pause advancing while the frame is faked-off (quiet hours / unplugged); resume on wake. */
+    fun setAsleep(asleep: Boolean) {
+        if (asleep) advanceJob?.cancel() else restartAdvanceLoop()
+    }
+
     fun togglePause() {
         val paused = !_uiState.value.isPaused
         _uiState.value = _uiState.value.copy(isPaused = paused)

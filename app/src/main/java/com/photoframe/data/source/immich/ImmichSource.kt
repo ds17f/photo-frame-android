@@ -113,10 +113,11 @@ class ImmichSource(
     }
 
     /**
-     * Page through metadata search (newest-first), filtering to displayable images. Bounded by
-     * [MAX_LIST_ITEMS] so a huge whole-library selection (the owner's is ~60k) doesn't hold the
-     * entire library in memory — we keep the newest, which is all the bounded cache would retain
-     * anyway. Only the download budget in [SourceSyncer] decides what actually lands on disk.
+     * Page through metadata search (newest-first), filtering to displayable images. Under the
+     * streaming-cache model the index must hold a row for **every** remote photo (the owner's is
+     * ~60k) so the playlist roams the whole library — this only lists metadata (no downloads), which
+     * is cheap, so the bound [MAX_LIST_ITEMS] is set well above any realistic library as a safety
+     * valve, not a cache-depth limit.
      */
     private suspend fun searchAll(base: ImmichSearchRequestDto): List<ImmichAssetDto> {
         val out = ArrayList<ImmichAssetDto>()
@@ -155,11 +156,10 @@ class ImmichSource(
         private const val PAGE_SIZE = 1000
 
         /**
-         * Upper bound on how many photos one facet lists (newest-first). Comfortably above the
-         * default cache capacity (~12k previews at 4 GB) so the cache is always full of the
-         * newest photos, while capping memory/time for enormous libraries.
+         * Safety bound on how many photos one facet lists (newest-first). Well above any realistic
+         * library so the full collection is indexed; only caps memory/time for a pathological set.
          */
-        private const val MAX_LIST_ITEMS = 30_000
+        private const val MAX_LIST_ITEMS = 500_000
 
         /** Tolerant parse across Immich's date shapes (UTC instant, offset, or local). */
         fun parseImmichTime(raw: String?): Instant? {

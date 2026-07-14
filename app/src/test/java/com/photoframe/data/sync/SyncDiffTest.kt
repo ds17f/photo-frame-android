@@ -11,13 +11,14 @@ class SyncDiffTest {
     private fun remote(id: String, hash: String? = null) = RemotePhoto(remoteId = id, contentHash = hash)
     private fun have(id: String, hash: String? = null) = ExistingPhoto(id, hash)
 
-    @Test fun newPhotos_areDownloaded() {
+    @Test fun newPhotos_areInserted() {
         val plan = SyncDiff.plan(
             remote = listOf(remote("a"), remote("b")),
             existing = listOf(have("a")),
             deletionPolicy = DeletionPolicy.MIRROR,
         )
-        assertEquals(listOf("b"), plan.toDownload.map { it.remoteId })
+        assertEquals(listOf("b"), plan.toInsert.map { it.remoteId })
+        assertTrue(plan.toReindex.isEmpty())
         assertTrue(plan.toDelete.isEmpty())
     }
 
@@ -27,7 +28,7 @@ class SyncDiffTest {
             existing = listOf(have("a"), have("gone")),
             deletionPolicy = DeletionPolicy.MIRROR,
         )
-        assertTrue(plan.toDownload.isEmpty())
+        assertTrue(plan.toInsert.isEmpty())
         assertEquals(listOf("gone"), plan.toDelete)
     }
 
@@ -40,16 +41,17 @@ class SyncDiffTest {
         assertTrue(plan.toDelete.isEmpty())
     }
 
-    @Test fun changedContentHash_isRedownloaded() {
+    @Test fun changedContentHash_isReindexed() {
         val plan = SyncDiff.plan(
             remote = listOf(remote("a", hash = "new")),
             existing = listOf(have("a", hash = "old")),
             deletionPolicy = DeletionPolicy.MIRROR,
         )
-        assertEquals(listOf("a"), plan.toDownload.map { it.remoteId })
+        assertEquals(listOf("a"), plan.toReindex.map { it.remoteId })
+        assertTrue(plan.toInsert.isEmpty())
     }
 
-    @Test fun sameHash_isNotRedownloaded() {
+    @Test fun sameHash_isNoOp() {
         val plan = SyncDiff.plan(
             remote = listOf(remote("a", hash = "same")),
             existing = listOf(have("a", hash = "same")),
@@ -59,12 +61,13 @@ class SyncDiffTest {
     }
 
     @Test fun missingHashOnEitherSide_leavesExistingAlone() {
-        // No reliable comparison possible → don't churn the download.
+        // No reliable change signal → don't re-index (would drop the cached file needlessly).
         val plan = SyncDiff.plan(
             remote = listOf(remote("a", hash = null)),
             existing = listOf(have("a", hash = "old")),
             deletionPolicy = DeletionPolicy.MIRROR,
         )
-        assertTrue(plan.toDownload.isEmpty())
+        assertTrue(plan.toInsert.isEmpty())
+        assertTrue(plan.toReindex.isEmpty())
     }
 }

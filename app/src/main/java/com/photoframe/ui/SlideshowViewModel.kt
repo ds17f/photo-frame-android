@@ -4,10 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.photoframe.PhotoFrameApp
+import com.photoframe.data.PhotoKey
 import com.photoframe.data.PhotoRepository
+import com.photoframe.data.PhotoStatus
 import com.photoframe.data.db.PhotoEntity
 import com.photoframe.data.db.PhotoRef
 import com.photoframe.data.fixture.FixtureImporter
+import com.photoframe.data.sync.PhotoPrefetcher
 import com.photoframe.data.toPlaylistPhoto
 import com.photoframe.playlist.PlaylistEngine
 import com.photoframe.playlist.model.Orientation
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -34,6 +38,7 @@ import java.time.Duration
 data class SlideshowUiState(
     val slide: UiSlide? = null,
     val settings: DisplaySettings = DisplaySettings(),
+    /** Photos the frame can see — the full index (INDEXED + READY), not just cached ones. */
     val photoCount: Int = 0,
     val isPaused: Boolean = false,
     val controlsVisible: Boolean = false,
@@ -41,9 +46,11 @@ data class SlideshowUiState(
 )
 
 /**
- * Drives the slideshow: seeds fixtures, feeds the cache index into the [PlaylistEngine],
- * applies Display settings live, and advances slides on a timer. The engine reads only from
- * the local cache index, so this never blocks on the network (DESIGN §6).
+ * Drives the slideshow (streaming-cache model, docs/STORAGE_PLAN.md): seeds fixtures, feeds the
+ * **full index** into the [PlaylistEngine] via keyset-paged reads (never one observed full-table
+ * query — that overflows the CursorWindow), keeps the [PhotoPrefetcher] pointed at the upcoming
+ * horizon, and skips slides whose photos aren't cached yet. The engine reads only from the local
+ * cache, so playback never blocks on the network (DESIGN §6).
  */
 class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -53,6 +60,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private val fixtureImporter: FixtureImporter = container.fixtureImporter
     private val sourceRepository = container.sourceRepository
     private val photoSourceFactory = container.photoSourceFactory
+    private val prefetcher: PhotoPrefetcher = container.photoPrefetcher
 
     /** One-shot user messages (e.g. delete result) for the UI to surface as a toast. */
     private val _events = Channel<String>(Channel.BUFFERED)
@@ -60,12 +68,15 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
 
     private val engine = PlaylistEngine()
 
-    /** id (sourceId/remoteId) -> lightweight ref, for projecting engine slides into UI slides.
+    /** id (sourceId/remoteId) -> lightweight ref for the whole index, for projecting engine slides.
      *  The heavy fields (localPath, caption) are fetched per on-screen photo via the repository. */
     private var photoIndex: Map<String, PhotoRef> = emptyMap()
 
     private val _uiState = MutableStateFlow(SlideshowUiState())
     val uiState: StateFlow<SlideshowUiState> = _uiState.asStateFlow()
+
+    /** Conflated: any index change (sync add/remove, or a prefetch that cached a file) → re-feed. */
+    private val reloadSignal = Channel<Unit>(Channel.CONFLATED)
 
     private var advanceJob: Job? = null
     private var slideJob: Job? = null
@@ -77,7 +88,8 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (com.photoframe.BuildConfig.DEBUG) runCatching { fixtureImporter.importAll() }
             observeSettings()
-            observePhotos()
+            startIndexFeed()
+            prefetcher.start()
             restartAdvanceLoop()
         }
     }
@@ -97,14 +109,26 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         }.launchIn(viewModelScope)
     }
 
-    private fun observePhotos() {
-        photoRepository.observeReadyPhotos().onEach { refs ->
-            photoIndex = refs.associateBy { it.key }
-            engine.setPhotos(refs.map { it.toPlaylistPhoto() })
-            val hadSlide = _uiState.value.slide != null
-            _uiState.value = _uiState.value.copy(photoCount = refs.size, loading = false)
-            if (!hadSlide && refs.isNotEmpty()) advance(forward = true)
-        }.launchIn(viewModelScope)
+    /**
+     * Feed the engine the full index, reloading (debounced/coalesced) whenever the index changes.
+     * The reload reads refs via keyset paging off the main thread, then applies on the main thread
+     * where the engine lives (it's single-threaded by contract).
+     */
+    private fun startIndexFeed() {
+        photoRepository.observeRowCount().onEach { reloadSignal.trySend(Unit) }.launchIn(viewModelScope)
+        prefetcher.cached.onEach { reloadSignal.trySend(Unit) }.launchIn(viewModelScope)
+        viewModelScope.launch {
+            while (isActive) {
+                reloadSignal.receive()
+                delay(RELOAD_DEBOUNCE_MS) // let a burst of changes collapse into one re-feed
+                val refs = withContext(Dispatchers.IO) { photoRepository.loadFullIndex() }
+                photoIndex = refs.associateBy { it.key }
+                engine.setPhotos(refs.map { it.toPlaylistPhoto() })
+                val hadSlide = _uiState.value.slide != null
+                _uiState.value = _uiState.value.copy(photoCount = refs.size, loading = false)
+                if (!hadSlide && refs.isNotEmpty()) advance(forward = true) else updateHorizon()
+            }
+        }
     }
 
     /**
@@ -202,17 +226,32 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.value = _uiState.value.copy(controlsVisible = false)
     }
 
+    /**
+     * Advance to the next displayable slide. Slides whose photos aren't `READY` (not yet prefetched)
+     * or whose file is missing (SD card pulled) are skipped, bounded by [MAX_SKIP] so an empty pool
+     * can't spin forever; missing-file rows are repaired to `INDEXED` for the prefetcher to re-fetch.
+     * With the prefetcher holding the horizon, skips are rare in steady state.
+     */
     private fun advance(forward: Boolean) {
-        val slide = (if (forward) engine.next() else engine.previous()) ?: return
-        // Resolving the slide's photos now hits the DB (heavy fields are fetched per photo), so do
-        // it off the main thread. Cancel any in-flight resolution so the latest advance wins and
-        // rapid advances can't render out of order.
         slideJob?.cancel()
         slideJob = viewModelScope.launch {
-            val ui = toUiSlide(slide) ?: return@launch
-            _uiState.value = _uiState.value.copy(slide = ui)
-            markShown(slide)
+            var attempts = 0
+            while (attempts < MAX_SKIP) {
+                attempts++
+                val slide = (if (forward) engine.next() else engine.previous()) ?: break
+                val ui = toDisplayableSlide(slide) ?: continue
+                _uiState.value = _uiState.value.copy(slide = ui)
+                markShown(ui)
+                break
+            }
+            updateHorizon()
         }
+    }
+
+    /** Push the prefetcher's download horizon = the next [PhotoPrefetcher.HORIZON] upcoming photos. */
+    private fun updateHorizon() {
+        val keys = engine.peek(PhotoPrefetcher.HORIZON).map { PhotoKey.parse(it.id) }
+        viewModelScope.launch { prefetcher.setHorizon(keys) }
     }
 
     private fun restartAdvanceLoop() {
@@ -227,42 +266,77 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun markShown(slide: Slide) {
+    private fun markShown(slide: UiSlide) {
         val now = System.currentTimeMillis()
+        val ids = when (slide) {
+            is UiSlide.Single -> listOf(slide.photo.id)
+            is UiSlide.Pair -> listOf(slide.left.id, slide.right.id)
+        }
         viewModelScope.launch {
-            slide.photos.forEach { p ->
-                photoIndex[p.id]?.let { photoRepository.markShown(it.sourceId, it.remoteId, now) }
+            ids.forEach { id ->
+                photoIndex[id]?.let { photoRepository.markShown(it.sourceId, it.remoteId, now) }
             }
         }
     }
 
-    private suspend fun toUiSlide(slide: Slide): UiSlide? = when (slide) {
-        is Slide.Single -> uiPhoto(slide.photo.id)?.let { UiSlide.Single(it) }
+    /**
+     * Resolve an engine slide into a displayable UI slide, or null if it can't be shown (photos not
+     * cached / files missing). For a pair with only one cached half, fall back to showing that half.
+     */
+    private suspend fun toDisplayableSlide(slide: Slide): UiSlide? = when (slide) {
+        is Slide.Single -> readyEntity(slide.photo.id)?.let { UiSlide.Single(it.toUiPhoto()) }
         is Slide.Pair -> {
-            val l = uiPhoto(slide.left.id)
-            val r = uiPhoto(slide.right.id)
-            if (l != null && r != null) UiSlide.Pair(l, r) else l?.let { UiSlide.Single(it) }
+            val l = readyEntity(slide.left.id)
+            val r = readyEntity(slide.right.id)
+            when {
+                l != null && r != null -> UiSlide.Pair(l.toUiPhoto(), r.toUiPhoto())
+                l != null -> UiSlide.Single(l.toUiPhoto())
+                r != null -> UiSlide.Single(r.toUiPhoto())
+                else -> null
+            }
         }
     }
 
-    /** Resolve a playlist id into a displayable [UiPhoto], loading the heavy fields on demand. */
-    private suspend fun uiPhoto(id: String): UiPhoto? {
+    /**
+     * The full row for [id] if it's cached and its file still exists, else null. A row that claims
+     * READY but whose file is gone is repaired to INDEXED so the prefetcher re-fetches it.
+     */
+    private suspend fun readyEntity(id: String): PhotoEntity? {
         val ref = photoIndex[id] ?: return null
-        return photoRepository.photoByKey(ref.sourceId, ref.remoteId)?.toUiPhoto()
+        val entity = photoRepository.photoByKey(ref.sourceId, ref.remoteId) ?: return null
+        if (entity.status != PhotoStatus.READY.name) return null
+        val path = entity.localPath ?: return null
+        val exists = withContext(Dispatchers.IO) { File(path).exists() }
+        if (!exists) {
+            photoRepository.repairMissing(ref.sourceId, ref.remoteId)
+            return null
+        }
+        return entity
     }
 
     private fun PhotoEntity.toUiPhoto(): UiPhoto {
         val pp = toPlaylistPhoto()
         return UiPhoto(
             id = pp.id,
-            path = localPath,
+            path = localPath.orEmpty(),
             orientation = pp.orientation,
             takenAt = pp.takenAt,
             locationLabel = locationLabel,
         )
     }
 
+    override fun onCleared() {
+        prefetcher.stop()
+        super.onCleared()
+    }
+
     companion object {
         private const val CONTROLS_TIMEOUT_MS = 5_000L
+
+        /** Bound on how many un-cached slides advance() may skip before giving up this tick. */
+        private const val MAX_SKIP = 50
+
+        /** Debounce window collapsing a burst of index changes into a single re-feed. */
+        private const val RELOAD_DEBOUNCE_MS = 500L
     }
 }

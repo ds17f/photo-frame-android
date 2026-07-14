@@ -19,3 +19,30 @@ data class PhotoRef(
     /** Stable per-photo key, matching [PhotoEntity.key]. */
     val key: String get() = "$sourceId/$remoteId"
 }
+
+/**
+ * Minimal per-source index projection for metadata-sync diffing (streaming-cache model). Carries
+ * just enough to diff against the remote listing and to clean up files on change/removal, without
+ * loading fat [PhotoEntity] rows (which overflow the CursorWindow at ~35k rows — see [PhotoRef]).
+ */
+data class SourceIndexRow(
+    val remoteId: String,
+    val contentHash: String?,
+    val status: String,
+    val localPath: String?,
+)
+
+/**
+ * Projection of a cached (`READY`) row for eviction: least-recently-shown selection needs only the
+ * key, size and show time (plus the file path to delete). Kept narrow so the READY set fits the
+ * CursorWindow even with a large cache.
+ */
+data class EvictionRef(
+    val sourceId: String,
+    val remoteId: String,
+    val localPath: String?,
+    val sizeBytes: Long,
+    val lastShownAt: Long?,
+) {
+    val key: String get() = "$sourceId/$remoteId"
+}

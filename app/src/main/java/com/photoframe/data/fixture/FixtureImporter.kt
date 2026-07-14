@@ -35,7 +35,7 @@ class FixtureImporter(
             addAll(importBundledSamples())
             addAll(importDebugFolder())
         }
-        if (rows.isNotEmpty()) repository.upsert(rows)
+        if (rows.isNotEmpty()) repository.indexFixtures(rows)
         rows.size
     }
 

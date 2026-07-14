@@ -4,10 +4,14 @@ import androidx.room.Entity
 import androidx.room.Index
 
 /**
- * One cached photo (DESIGN §6). Primary key is `sourceId + remoteId` so the same remote
- * asset from two configured sources stays distinct. Times are epoch millis (UTC); nullable
- * where the source may not provide them. `localPath` points into app-private cache storage —
- * the slideshow renders only from these files, never from the network.
+ * One photo index row (streaming-cache model, docs/STORAGE_PLAN.md). Primary key is
+ * `sourceId + remoteId` so the same remote asset from two configured sources stays distinct.
+ * Times are epoch millis (UTC); nullable where the source may not provide them.
+ *
+ * `localPath` is **nullable**: null (with [status] `INDEXED`) means the photo is indexed but not
+ * downloaded; non-null (with `READY`) means a display-sized file is on disk. The slideshow renders
+ * only from READY files, never from the network. `lastShownAt` survives eviction (rows persist),
+ * so it is a permanent per-photo show history.
  */
 @Entity(
     tableName = "photos",
@@ -21,7 +25,8 @@ import androidx.room.Index
 data class PhotoEntity(
     val sourceId: String,
     val remoteId: String,
-    val localPath: String,
+    /** Null when the row is `INDEXED` (metadata only); set when the file is `READY` on disk. */
+    val localPath: String?,
     val takenAt: Long?,
     val width: Int?,
     val height: Int?,

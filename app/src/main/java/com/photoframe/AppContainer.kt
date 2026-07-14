@@ -7,6 +7,7 @@ import com.photoframe.data.db.PhotoFrameDatabase
 import com.photoframe.data.fixture.FixtureImporter
 import com.photoframe.data.secrets.EncryptedSecrets
 import com.photoframe.data.source.SourceRepository
+import com.photoframe.data.sync.PhotoPrefetcher
 import com.photoframe.data.sync.PhotoSourceFactory
 import com.photoframe.data.sync.SyncManager
 import com.photoframe.settings.DisplaySettingsRepository
@@ -28,6 +29,15 @@ class AppContainer(context: Context) {
         SourceRepository(database.sourceDao(), secrets)
     }
     val photoSourceFactory: PhotoSourceFactory by lazy { PhotoSourceFactory(sourceRepository) }
+
+    /**
+     * Playback-side prefetcher (streaming-cache model): keeps the upcoming playlist horizon cached
+     * ahead of playback. Singleton so the slideshow drives its horizon and the [SyncManager]'s
+     * evictor can read its protected set. Started/stopped with the slideshow.
+     */
+    val photoPrefetcher: PhotoPrefetcher by lazy {
+        PhotoPrefetcher(database.photoDao(), cache, sourceRepository, photoSourceFactory)
+    }
     val fixtureImporter: FixtureImporter by lazy {
         FixtureImporter(appContext, cache, photoRepository)
     }
@@ -48,6 +58,7 @@ class AppContainer(context: Context) {
             cache = cache,
             syncSettingsRepository = syncSettingsRepository,
             scheduleSettingsRepository = scheduleSettingsRepository,
+            prefetcher = photoPrefetcher,
         )
     }
 }

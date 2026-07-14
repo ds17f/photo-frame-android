@@ -3,6 +3,7 @@ package com.photoframe.playlist
 import com.photoframe.playlist.TestPhotos.landscape
 import com.photoframe.playlist.TestPhotos.landscapes
 import com.photoframe.playlist.model.OrderMode
+import com.photoframe.playlist.model.Orientation
 import com.photoframe.playlist.model.Slide
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -90,6 +91,53 @@ class PlaylistEngineTest {
         // Next full cycle should now be chronological.
         val ids = (1..5).map { e.next()!!.id() }
         assertEquals(listOf("L1", "L2", "L3", "L4", "L5"), ids)
+    }
+
+    @Test fun peek_returnsUpcomingBagWithoutConsuming() {
+        val e = engine()
+        e.setPhotos(landscapes(10))
+        e.next() // build a cycle; one photo now consumed into history
+        val peeked = e.peek(3).map { it.id }
+        // Peeking must not consume: the next three advances yield exactly the peeked ids.
+        assertEquals(peeked, (1..3).map { e.next()!!.id() })
+    }
+
+    @Test fun peek_returnsForwardHistoryFirst_afterSwipingBack() {
+        val e = engine()
+        e.setPhotos(landscapes(10))
+        val a = e.next()!!.id()
+        val b = e.next()!!.id()
+        val c = e.next()!!.id()
+        e.previous() // now on b, with c ahead in forward history
+        e.previous() // now on a, with b,c ahead in forward history
+        val peeked = e.peek(2).map { it.id }
+        assertEquals(listOf(b, c), peeked)
+    }
+
+    @Test fun peek_clampsToAvailable() {
+        val e = engine()
+        e.setPhotos(landscapes(2))
+        e.next()
+        assertTrue(e.peek(100).size <= 2)
+    }
+
+    @Test fun setPhotos_refreshesDimsOfBagEntries() {
+        // A photo enters the bag as UNKNOWN orientation (remote dims wrong), then a re-feed corrects
+        // it to PORTRAIT (decoded bounds after prefetch). The upcoming bag entry must reflect the
+        // corrected dims so pairing isn't decided on stale orientation. Chronological order makes
+        // which photo stays in the bag deterministic.
+        val e = engine()
+        e.updateConfig(orderMode = OrderMode.CHRONOLOGICAL)
+        val ls = (1..5).map {
+            TestPhotos.photo("L$it", takenAt = Instant.parse("2020-01-0${it}T00:00:00Z"))
+        }
+        val takenAt = Instant.parse("2020-02-01T00:00:00Z") // latest → sorts to the back of the bag
+        e.setPhotos(ls + TestPhotos.photo("P1", orientation = Orientation.UNKNOWN, takenAt = takenAt))
+        e.next() // consumes L1 (earliest); P1 sits at the back of `remaining`
+        e.setPhotos(ls + TestPhotos.photo("P1", orientation = Orientation.PORTRAIT, takenAt = takenAt))
+        val upcoming = e.peek(10).firstOrNull { it.id == "P1" }
+        assertNotNull("P1 should still be upcoming", upcoming)
+        assertEquals(Orientation.PORTRAIT, upcoming!!.orientation)
     }
 
     @Test fun current_isNullBeforeFirstNext_thenTracks() {

@@ -81,6 +81,17 @@ class PlaylistEngine(
         // Drop vanished photos from the pending bag.
         if (removedIds.isNotEmpty()) remaining.removeAll { it.id in removedIds }
 
+        // Refresh dims/metadata on entries still in the bag: a photo's orientation may have been
+        // corrected from decoded bounds after download (its remote-reported dims were wrong), and
+        // the bag holds a stale snapshot — without this it could be mis-paired on its first show.
+        if (remaining.isNotEmpty()) {
+            val it = remaining.listIterator()
+            while (it.hasNext()) {
+                val fresh = incoming[it.next().id]
+                if (fresh != null) it.set(fresh)
+            }
+        }
+
         if (addedIds.isEmpty()) return
         val added = addedIds.map { incoming.getValue(it) }
 
@@ -118,6 +129,28 @@ class PlaylistEngine(
         remaining.addAll(
             PhotoOrdering.order(all.values.toList(), orderMode, random, clock(), recencyWindow),
         )
+    }
+
+    /**
+     * The next [n] photos that playback will consume, without mutating the bag — the prefetcher's
+     * download horizon. Forward history (slides the user swiped back past, which `next()` replays
+     * first) comes ahead of the upcoming bag. Near a cycle boundary this may return fewer than [n]
+     * (the next cycle isn't drawn yet); the prefetcher simply fetches what it can see.
+     */
+    fun peek(n: Int): List<PlaylistPhoto> {
+        if (n <= 0) return emptyList()
+        val out = ArrayList<PlaylistPhoto>(n)
+        for (i in historyIndex + 1 until history.size) {
+            for (p in history[i].photos) {
+                out += p
+                if (out.size >= n) return out
+            }
+        }
+        for (p in remaining) {
+            out += p
+            if (out.size >= n) return out
+        }
+        return out
     }
 
     /** Current slide, or null if nothing has been shown yet. */

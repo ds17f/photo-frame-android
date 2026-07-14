@@ -8,14 +8,16 @@ enum class SourceType {
     LOCAL_FOLDER,
 }
 
-/** Lifecycle of a cached photo row. */
+/**
+ * Lifecycle of a photo index row (streaming-cache model, see docs/STORAGE_PLAN.md). Every remote
+ * photo has a row; the file is optional. A row moves INDEXED → READY when the prefetcher downloads
+ * its file, and back to INDEXED when the file is evicted, its content changes, or it goes missing.
+ * Rows are deleted only when the remote photo vanishes — never by eviction.
+ */
 enum class PhotoStatus {
-    /** File present in the cache and displayable. */
+    /** Indexed (metadata only) — no file on disk. The prefetcher downloads these on demand. */
+    INDEXED,
+
+    /** File present in the cache and displayable. The slideshow renders only READY rows. */
     READY,
-
-    /** Indexed but not yet downloaded (used by the network sync engine in Phase 2). */
-    PENDING,
-
-    /** Backing file is gone; row should be re-synced or evicted. */
-    MISSING,
 }

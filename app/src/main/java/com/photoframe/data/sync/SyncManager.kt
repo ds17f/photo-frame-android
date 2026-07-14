@@ -13,12 +13,12 @@ import com.photoframe.settings.SyncSettingsRepository
 import kotlinx.coroutines.CancellationException
 import java.time.LocalTime
 
-/** Roll-up of a full sync pass, for the caller (worker / sync-now button). */
+/** Roll-up of a full metadata-sync pass, for the caller (worker / sync-now button). */
 data class SyncSummary(
     val sourcesSynced: Int,
-    val downloaded: Int,
-    val deleted: Int,
-    val failed: Int,
+    val indexed: Int,
+    val reindexed: Int,
+    val removed: Int,
 )
 
 /**
@@ -34,9 +34,10 @@ class SyncManager(
     private val cache: PhotoCache,
     private val syncSettingsRepository: SyncSettingsRepository,
     private val scheduleSettingsRepository: ScheduleSettingsRepository,
+    private val prefetcher: PhotoPrefetcher,
 ) {
     private val factory = PhotoSourceFactory(sourceRepository)
-    private val syncer = SourceSyncer(photoDao, cache)
+    private val syncer = MetadataSyncer(photoDao, cache)
     private val evictor = CacheEvictor(photoDao)
 
     /**
@@ -50,30 +51,31 @@ class SyncManager(
         }
         val settings = syncSettingsRepository.current()
         val sources = sourceRepository.listEnabled()
-        var downloaded = 0
-        var deleted = 0
-        var failed = 0
+        var indexed = 0
+        var reindexed = 0
+        var removed = 0
         var synced = 0
 
         for (source in sources) {
-            val outcome = syncOne(source, settings.deletionPolicy, settings.cacheCapBytes) ?: continue
+            val outcome = syncOne(source, settings.deletionPolicy) ?: continue
             synced++
-            downloaded += outcome.downloaded
-            deleted += outcome.deleted
-            failed += outcome.failed
+            indexed += outcome.indexed
+            reindexed += outcome.reindexed
+            removed += outcome.removed
         }
 
-        val freed = evictor.enforce(settings.cacheCapBytes)
+        // Keep the retained pool under the cap. Exclude the prefetcher's horizon/in-flight set so a
+        // freshly-fetched photo awaiting its turn isn't reclaimed out from under playback.
+        val freed = evictor.enforce(settings.cacheCapBytes, prefetcher.protectedKeys())
         if (freed > 0) log(null, SyncLogEntity.Level.INFO, "Evicted ${freed / (1024 * 1024)} MB to stay under cap")
         syncLogDao.trimTo(LOG_RETENTION)
 
-        return SyncSummary(synced, downloaded, deleted, failed)
+        return SyncSummary(synced, indexed, reindexed, removed)
     }
 
     private suspend fun syncOne(
         source: ConfiguredSource,
         deletionPolicy: com.photoframe.data.source.DeletionPolicy,
-        capBytes: Long,
     ): SyncOutcome? {
         val live = factory.create(source)
         if (live == null) {
@@ -81,20 +83,20 @@ class SyncManager(
             return null
         }
         return try {
-            val outcome = syncer.sync(live, deletionPolicy, capBytes)
+            val outcome = syncer.sync(live, deletionPolicy)
             sourceRepository.recordSync(
                 id = source.id,
                 health = outcome.health,
                 lastSyncAtMillis = System.currentTimeMillis(),
-                photoCount = outcome.photoCount,
+                photoCount = outcome.indexedCount,
             )
             log(
                 source.id,
-                if (outcome.failed > 0) SyncLogEntity.Level.WARN else SyncLogEntity.Level.INFO,
-                "${source.displayName}: +${outcome.downloaded} −${outcome.deleted}" +
-                    (if (outcome.failed > 0) " (${outcome.failed} failed)" else "") +
-                    (if (outcome.skippedForBudget > 0) " (${outcome.skippedForBudget} over cap)" else "") +
-                    " → ${outcome.photoCount} photos [${outcome.health.status}]",
+                SyncLogEntity.Level.INFO,
+                "${source.displayName}: +${outcome.indexed} indexed" +
+                    (if (outcome.reindexed > 0) " ~${outcome.reindexed} changed" else "") +
+                    (if (outcome.removed > 0) " −${outcome.removed} removed" else "") +
+                    " → ${outcome.indexedCount} indexed, ${outcome.cachedCount} cached [${outcome.health.status}]",
             )
             outcome
         } catch (e: CancellationException) {

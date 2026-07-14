@@ -11,9 +11,14 @@ import java.io.File
  * LRU cache eviction under the configured size cap (streaming-cache model, docs/STORAGE_PLAN.md).
  * Evicts the **file** of the least-recently-shown cached photos, but **keeps the index row** (status
  * back to `INDEXED`, `lastShownAt` preserved) — reach lives in the index, and show history is
- * permanent. Never evicts a photo that hasn't been shown yet (freshly prefetched, awaiting its turn)
- * nor any photo in the prefetcher's protected set (its horizon + in-flight downloads), so eviction
- * and prefetch don't fight over the same bytes.
+ * permanent.
+ *
+ * The only photos never evicted are those in the prefetcher's **protected set** (its horizon +
+ * in-flight downloads), so eviction and prefetch don't fight over the same bytes. Never-shown
+ * photos are evicted least-recently-shown-first like any other (SQLite orders NULL `lastShownAt`
+ * first): they are speculative — prefetched-then-skipped orphans — and the "freshly prefetched,
+ * awaiting its turn" case is already covered by horizon protection. (Protecting *all* never-shown
+ * rows, as an earlier design did, let such orphans accumulate past the cap so it couldn't be held.)
  */
 class CacheEvictor(private val photoDao: PhotoDao) {
 
@@ -52,10 +57,11 @@ class CacheEvictor(private val photoDao: PhotoDao) {
         const val EVICTION_SCAN_LIMIT = 20_000
 
         /**
-         * Pure victim selection: least-recently-shown first, skipping never-shown photos
-         * (`lastShownAt == null`, the one-full-cycle protection) and anything in [protectedKeys].
-         * [ordered] must be ascending by `lastShownAt` (as [PhotoDao.cachedByLeastRecentlyShown]
-         * returns). Evicts until the cached total would fall to [capBytes].
+         * Pure victim selection: least-recently-shown first (never-shown/NULL first — speculative
+         * orphans are the least valuable to keep), skipping only anything in [protectedKeys] (the
+         * prefetch horizon + in-flight). [ordered] must be ascending by `lastShownAt` (as
+         * [PhotoDao.cachedByLeastRecentlyShown] returns; SQLite sorts NULLs first). Evicts until the
+         * cached total would fall to [capBytes].
          */
         fun selectVictims(
             ordered: List<EvictionRef>,
@@ -67,7 +73,6 @@ class CacheEvictor(private val photoDao: PhotoDao) {
             val victims = ArrayList<EvictionRef>()
             for (photo in ordered) {
                 if (remaining <= capBytes) break
-                if (photo.lastShownAt == null) continue // never shown — protected
                 if (photo.key in protectedKeys) continue // prefetch horizon / in-flight
                 victims += photo
                 remaining -= photo.sizeBytes

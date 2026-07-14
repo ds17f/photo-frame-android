@@ -7,6 +7,7 @@ import com.photoframe.data.db.PhotoFrameDatabase
 import com.photoframe.data.fixture.FixtureImporter
 import com.photoframe.data.secrets.EncryptedSecrets
 import com.photoframe.data.source.SourceRepository
+import com.photoframe.data.sync.CacheEvictor
 import com.photoframe.data.sync.PhotoPrefetcher
 import com.photoframe.data.sync.PhotoSourceFactory
 import com.photoframe.data.sync.SyncManager
@@ -30,13 +31,21 @@ class AppContainer(context: Context) {
     }
     val photoSourceFactory: PhotoSourceFactory by lazy { PhotoSourceFactory(sourceRepository) }
 
+    val cacheEvictor: CacheEvictor by lazy { CacheEvictor(database.photoDao()) }
+
     /**
      * Playback-side prefetcher (streaming-cache model): keeps the upcoming playlist horizon cached
-     * ahead of playback. Singleton so the slideshow drives its horizon and the [SyncManager]'s
-     * evictor can read its protected set. Started/stopped with the slideshow.
+     * ahead of playback. Singleton so the slideshow drives its horizon and the evictor can read its
+     * protected set. Started/stopped with the slideshow. Its pool maintainer enforces the cache cap
+     * in steady state (after prefetch batches), excluding its own horizon/in-flight set — so the
+     * cap holds without waiting for the 30-min sync pass.
      */
     val photoPrefetcher: PhotoPrefetcher by lazy {
-        PhotoPrefetcher(database.photoDao(), cache, sourceRepository, photoSourceFactory)
+        PhotoPrefetcher(database.photoDao(), cache, sourceRepository, photoSourceFactory).also { pf ->
+            pf.setPoolMaintainer {
+                cacheEvictor.enforce(syncSettingsRepository.current().cacheCapBytes, pf.protectedKeys())
+            }
+        }
     }
     val fixtureImporter: FixtureImporter by lazy {
         FixtureImporter(appContext, cache, photoRepository)
@@ -59,6 +68,7 @@ class AppContainer(context: Context) {
             syncSettingsRepository = syncSettingsRepository,
             scheduleSettingsRepository = scheduleSettingsRepository,
             prefetcher = photoPrefetcher,
+            evictor = cacheEvictor,
         )
     }
 }

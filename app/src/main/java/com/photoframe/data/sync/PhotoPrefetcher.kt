@@ -58,9 +58,18 @@ class PhotoPrefetcher(
     private val readyAt = HashMap<PhotoKey, Long>()
     private val liveSources = HashMap<String, PhotoSource?>()
 
+    /** Keeps the retained pool under its cap in steady state (set by the container to run the
+     *  evictor). Invoked, throttled, after prefetch batches so the cap holds without waiting for
+     *  the 30-min sync. Null until wired. */
+    private var poolMaintainer: (suspend () -> Unit)? = null
+    private var lastMaintainAt = 0L
+
     /** Emitted after a photo becomes READY, so the slideshow re-feeds and picks up corrected dims. */
     private val _cached = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val cached: SharedFlow<Unit> = _cached
+
+    /** Wire the steady-state pool maintainer (the container runs the evictor here). */
+    fun setPoolMaintainer(block: suspend () -> Unit) { poolMaintainer = block }
 
     fun start() {
         if (loopJob?.isActive == true) return
@@ -142,9 +151,31 @@ class PhotoPrefetcher(
                     readyAt[key] = clock() + PrefetchPolicy.backoffMillis(fc)
                 }
             }
-            if (ok) _cached.tryEmit(Unit)
+            if (ok) {
+                _cached.tryEmit(Unit)
+                maybeMaintainPool()
+            }
             wake.trySend(Unit)
         }
+    }
+
+    /**
+     * Run the pool maintainer (eviction) after a cache, throttled — the pool grows one photo at a
+     * time, so checking the cap every few seconds is enough to hold it. The evictor early-returns
+     * cheaply when under the cap, and excludes this prefetcher's protected set.
+     */
+    private suspend fun maybeMaintainPool() {
+        val maintain = poolMaintainer ?: return
+        val due = stateMutex.withLock {
+            val now = clock()
+            if (now - lastMaintainAt >= MAINTAIN_INTERVAL_MS) {
+                lastMaintainAt = now
+                true
+            } else {
+                false
+            }
+        }
+        if (due) runCatching { maintain() }
     }
 
     /** Download one photo's file into the cache and flip its row to READY. Returns success. */
@@ -210,5 +241,8 @@ class PhotoPrefetcher(
 
         private const val IDLE_WAIT_MS = 30_000L
         private const val MIN_WAIT_MS = 200L
+
+        /** Minimum spacing between steady-state cap-enforcement passes triggered by prefetch. */
+        private const val MAINTAIN_INTERVAL_MS = 5_000L
     }
 }

@@ -74,19 +74,20 @@ fun SyncSettingsScreen(
             }
             Divider()
 
-            // Cache cap
+            // Cache cap — the retained-pool buffer size (the frame sees the whole library regardless).
             Column {
+                Text("Cache cap: ${formatBytes(settings.cacheCapBytes)}", fontWeight = FontWeight.SemiBold)
                 val capGb = settings.cacheCapBytes / (1024.0 * 1024 * 1024)
-                Text("Cache cap: ${"%.1f".format(capGb)} GB", fontWeight = FontWeight.SemiBold)
                 Slider(
                     value = capGb.toFloat(),
                     onValueChange = { gb ->
                         onUpdate { it.copy(cacheCapBytes = (gb.toDouble() * 1024 * 1024 * 1024).toLong()) }
                     },
-                    valueRange = 0.5f..32f,
+                    valueRange = 0.25f..32f,
                 )
                 Text(
-                    "Using ${formatBytes(cacheUsageBytes)} of ${formatBytes(settings.cacheCapBytes)}.",
+                    "Using ${formatBytes(cacheUsageBytes)} of ${formatBytes(settings.cacheCapBytes)}. " +
+                        "A retained buffer of recently-shown photos — not a limit on how many photos the frame sees.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

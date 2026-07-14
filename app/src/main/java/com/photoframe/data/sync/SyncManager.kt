@@ -35,10 +35,10 @@ class SyncManager(
     private val syncSettingsRepository: SyncSettingsRepository,
     private val scheduleSettingsRepository: ScheduleSettingsRepository,
     private val prefetcher: PhotoPrefetcher,
+    private val evictor: CacheEvictor,
 ) {
     private val factory = PhotoSourceFactory(sourceRepository)
     private val syncer = MetadataSyncer(photoDao, cache)
-    private val evictor = CacheEvictor(photoDao)
 
     /**
      * @param respectQuietHours when true (the periodic job), skip syncing during quiet hours

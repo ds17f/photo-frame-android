@@ -30,7 +30,7 @@ photos appear on the frame without manual steps.
 | Screens: 1280×800 (HD 8), 1920×1200 (HD 10) | Download/decode images at ~2048px max; never hold full-res originals in memory |
 | 2–3 GB RAM, modest GPU | Downsample bitmaps to view size, preload only one photo ahead, keep transitions GPU-cheap |
 | Default browser is Amazon Silk | AppAuth must tolerate missing Custom Tabs (falls back to a plain `VIEW` intent) |
-| Sideloaded APK | Simple `assembleRelease` + `adb install` workflow; self-signed keystore checked into the repo is fine for a personal app |
+| Sideloaded APK | Simple `assembleRelease` + `adb install` workflow; self-signed keystore generated locally via `scripts/init-signing.sh` (gitignored, never committed — CI signs from GitHub secrets) is fine for a personal app |
 | Tablet lives on home LAN, plugged in | Immich reachable by LAN URL; "keep screen on" is safe; optional sleep-when-unplugged |
 
 Development note: no Fire tablet is needed for day-to-day dev. Use a standard Android

@@ -8,8 +8,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// Load the release keystore config. The keystore is a self-signed key checked into the
-// repo (personal, sideloaded app — see DESIGN.md §3). keystore.properties points at it.
+// Load the release keystore config. The keystore is a self-signed key generated locally by
+// scripts/init-signing.sh (personal, sideloaded app — see DESIGN.md §3 and README). It is
+// gitignored, never committed; keystore.properties (also gitignored) points at it. If absent,
+// the release build falls back to the debug key so a fresh checkout still builds.
 val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) load(keystorePropsFile.inputStream())

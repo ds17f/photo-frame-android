@@ -80,10 +80,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # If store-signing secrets are configured, decode them and point keystore.properties
-      # at the injected keystore. Otherwise the build falls back to the checked-in
-      # self-signed key (fine for sideload; see DESIGN.md §3). Publishing to a store — which
-      # DESIGN.md §2 currently lists as a non-goal — would use the secret path below.
+      # If signing secrets are configured (via scripts/set-gh-secrets.sh), decode them and
+      # point keystore.properties at the injected keystore. Otherwise the release build falls
+      # back to the debug key (fine for sideload CI artifacts; see DESIGN.md §3). The keystore
+      # is never committed — it lives only in these secrets and on the maintainer's machine.
       - name: Inject release keystore (if secret present)
         if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         env:

@@ -14,5 +14,8 @@ build/
 .env
 .env.local
 
-# Keep the self-signed release keystore + keystore.properties IN the repo on purpose
-# (personal sideloaded app, DESIGN.md §3). Do NOT add them here.
+# Release signing — private, never committed. Generate locally with
+# `scripts/init-signing.sh` (see README). CI signs from GitHub secrets.
+keystore.properties
+*.keystore
+*.jks

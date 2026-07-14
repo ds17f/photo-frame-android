@@ -26,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -115,8 +116,18 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
      * where the engine lives (it's single-threaded by contract).
      */
     private fun startIndexFeed() {
-        photoRepository.observeRowCount().onEach { reloadSignal.trySend(Unit) }.launchIn(viewModelScope)
-        prefetcher.cached.onEach { reloadSignal.trySend(Unit) }.launchIn(viewModelScope)
+        // Reload only on a real structural change. Room invalidates queries table-scoped, so every
+        // markShown/markCached/markEvicted write re-emits the row count with the SAME value —
+        // distinctUntilChanged collapses those (a full 60k re-feed on each prefetch would thrash GC).
+        photoRepository.observeRowCount()
+            .distinctUntilChanged()
+            .onEach { reloadSignal.trySend(Unit) }
+            .launchIn(viewModelScope)
+        // A completed prefetch doesn't change the index, so it must NOT trigger a full re-feed. It
+        // only needs to nudge the very first slide up promptly once the pool has something to show.
+        prefetcher.cached
+            .onEach { if (_uiState.value.slide == null) advance(forward = true) }
+            .launchIn(viewModelScope)
         viewModelScope.launch {
             while (isActive) {
                 reloadSignal.receive()
@@ -336,7 +347,8 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         /** Bound on how many un-cached slides advance() may skip before giving up this tick. */
         private const val MAX_SKIP = 50
 
-        /** Debounce window collapsing a burst of index changes into a single re-feed. */
-        private const val RELOAD_DEBOUNCE_MS = 500L
+        /** Debounce window collapsing a burst of index changes (e.g. streamed sync pages that each
+         *  insert rows) into a single re-feed, so first-run population doesn't thrash the engine. */
+        private const val RELOAD_DEBOUNCE_MS = 1_500L
     }
 }

@@ -41,42 +41,38 @@ class ImmichSource(
         }
     }
 
-    override suspend fun listPhotos(): List<RemotePhoto> {
+    override suspend fun listPhotos(onPage: suspend (List<RemotePhoto>) -> Unit) {
         val selection = config.selection
-        if (selection.isEmpty) return emptyList()
+        if (selection.isEmpty) return
 
-        // Union across facets, deduped by asset id (an asset can match several facets).
-        val byId = LinkedHashMap<String, RemotePhoto>()
+        // Dedupe across facets (an asset can match several) without holding the whole library:
+        // only the id set is retained; each page's DTOs are emitted then freed.
+        val seen = HashSet<String>()
+        suspend fun emit(assets: List<ImmichAssetDto>) {
+            val page = assets.asSequence()
+                .filter { it.isDisplayable && seen.add(it.id) }
+                .map { it.toRemotePhoto() }
+                .toList()
+            if (page.isNotEmpty()) onPage(page)
+        }
 
         // Albums — v3 serves album assets via metadata search filtered by album id (the album
         // detail endpoint no longer embeds assets). One search per album keeps the union clean.
         for (albumId in selection.albumIds) {
-            searchAll(ImmichSearchRequestDto(albumIds = listOf(albumId)))
-                .forEach { byId.putIfAbsent(it.id, it.toRemotePhoto()) }
+            searchEach(ImmichSearchRequestDto(albumIds = listOf(albumId))) { emit(it) }
         }
-
-        // People
         if (selection.personIds.isNotEmpty()) {
-            searchAll(ImmichSearchRequestDto(personIds = selection.personIds))
-                .forEach { byId.putIfAbsent(it.id, it.toRemotePhoto()) }
+            searchEach(ImmichSearchRequestDto(personIds = selection.personIds)) { emit(it) }
         }
-
-        // Favorites
         if (selection.favoritesOnly) {
-            searchAll(ImmichSearchRequestDto(isFavorite = true))
-                .forEach { byId.putIfAbsent(it.id, it.toRemotePhoto()) }
+            searchEach(ImmichSearchRequestDto(isFavorite = true)) { emit(it) }
         }
-
-        // Whole library / rolling window
         if (selection.wholeLibrary) {
             val takenAfter = selection.rollingWindowDays
                 ?.takeIf { it > 0 }
                 ?.let { Instant.now().minusSeconds(it.toLong() * 86_400).toString() }
-            searchAll(ImmichSearchRequestDto(takenAfter = takenAfter))
-                .forEach { byId.putIfAbsent(it.id, it.toRemotePhoto()) }
+            searchEach(ImmichSearchRequestDto(takenAfter = takenAfter)) { emit(it) }
         }
-
-        return byId.values.toList()
     }
 
     override suspend fun fetch(photo: RemotePhoto, sink: Sink) {
@@ -119,18 +115,23 @@ class ImmichSource(
      * is cheap, so the bound [MAX_LIST_ITEMS] is set well above any realistic library as a safety
      * valve, not a cache-depth limit.
      */
-    private suspend fun searchAll(base: ImmichSearchRequestDto): List<ImmichAssetDto> {
-        val out = ArrayList<ImmichAssetDto>()
+    private suspend fun searchEach(
+        base: ImmichSearchRequestDto,
+        onPage: suspend (List<ImmichAssetDto>) -> Unit,
+    ) {
         var page = 1
-        while (out.size < MAX_LIST_ITEMS) {
+        var listed = 0
+        while (listed < MAX_LIST_ITEMS) {
             val response = api.searchMetadata(base.copy(page = page, size = PAGE_SIZE))
             val items = response.assets.items
-            out += items.filter { it.isDisplayable }
+            if (items.isNotEmpty()) {
+                onPage(items)
+                listed += items.size
+            }
             val next = response.assets.nextPage?.toIntOrNull()
             if (next == null || items.isEmpty() || next <= page) break
             page = next
         }
-        return out
     }
 
     private fun ImmichAssetDto.toRemotePhoto(): RemotePhoto = RemotePhoto(

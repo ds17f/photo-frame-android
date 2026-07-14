@@ -60,8 +60,24 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
   through collecting only named people.
 - **Asset fields used:** `id`, `type`, `isFavorite/isArchived/isTrashed`, `fileCreatedAt`,
   `localDateTime`, `checksum` (→ `contentHash`), top-level `width`/`height`,
-  `exifInfo.{exifImageWidth,exifImageHeight,city,country,dateTimeOriginal}`. `SourceSyncer` still
+  `exifInfo.{exifImageWidth,exifImageHeight,city,country,dateTimeOriginal}`. The prefetcher still
   decodes the downloaded preview for the definitive display size (portrait pairing).
+- **⚠️ Full-library listing is slow — offset pagination (caught by live device testing,
+  streaming-cache model).** `POST /api/search/metadata` is page/offset-based, and over the owner's
+  ~71k-asset library a full `size=1000` listing takes **~104 s** (71 sequential pages; later pages
+  get slower as the server's OFFSET grows). Consequences and mitigations:
+  - The `MetadataSyncer` **streams** pages (`PhotoSource.listPhotos(onPage)`), inserting index rows
+    per page so the frame lights up within seconds and each page's DTOs are freed — before, holding
+    all 71k `ImmichAssetDto`+`RemotePhoto` in memory at once pinned the heap and caused a sustained
+    ~34 MB/1M-object GC storm ("startup takes forever"). Post-fix: ~3 MB GC blips.
+  - The full listing runs only on the **periodic** job and on a **stale** launch (last sync older
+    than the interval) — not on every warm start (`PhotoFrameApp` guards it).
+  - **Pagination is not a stable snapshot:** re-listing the *same* unchanged library returns a
+    slightly different set each pass (~120 of 71k drift at page boundaries — non-unique sort key +
+    concurrent changes). Under MIRROR this shows as a phantom `~117 indexed / ~126 removed` churn
+    each sync (deletes+re-adds boundary photos, losing their `lastShownAt`). Immich search exposes
+    no stable-cursor/custom-sort knob to eliminate it. Tolerable for now; a "delete only after
+    absent across two syncs" guard is the candidate fix if it ever matters.
 
 ## Google Photos Picker
 

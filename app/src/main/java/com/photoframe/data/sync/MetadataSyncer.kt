@@ -33,14 +33,15 @@ data class SyncOutcome(
 
 /**
  * Syncs one live [PhotoSource]'s **metadata** into the index (streaming-cache model,
- * docs/STORAGE_PLAN.md): `listPhotos()` → [SyncDiff] against the index → upsert index rows only.
- * It downloads nothing — the [PhotoPrefetcher] pulls files on demand ahead of playback — so a fresh
- * source is fully indexed in seconds and the playlist immediately roams the whole library.
+ * docs/STORAGE_PLAN.md). The source streams its listing page by page; each page is classified
+ * against the index ([SyncDiff]) and new rows are inserted immediately, so the prefetcher can start
+ * pulling and the frame lights up within seconds — and each page is freed rather than holding the
+ * whole (60k+) library in memory. Nothing is downloaded here.
  *
- * A failure to reach the source is reported OFFLINE and leaves the index untouched, so the frame
- * keeps playing from the retained pool (offline resilience, DESIGN §6). Writes are split so a
- * refresh never clobbers cache state: insert-new for new rows, re-index for changed content, and a
- * targeted delete for vanished photos.
+ * A failure to reach the source is reported OFFLINE and leaves the index intact (the frame keeps
+ * playing from the retained pool, DESIGN §6). Crucially, **mirror deletion only runs after the full
+ * listing succeeds** — a partial listing must never delete the photos it didn't reach. Writes are
+ * split so a refresh never clobbers cache state.
  */
 class MetadataSyncer(
     private val photoDao: PhotoDao,
@@ -53,91 +54,97 @@ class MetadataSyncer(
     ): SyncOutcome = withContext(Dispatchers.IO) {
         val sourceId = source.id
 
-        // 1. Desired set from the remote. Any failure here means the source is unreachable — the
-        //    index is left exactly as-is so the frame keeps playing (§6).
-        val remote = try {
-            source.listPhotos()
+        // Snapshot the current index for this source (paged so a 60k single-source library doesn't
+        // overflow the CursorWindow). Only the id set is retained across the whole listing.
+        val existing = HashMap<String, SourceIndexRow>()
+        loadExistingIndexInto(existing, sourceId)
+        val seen = HashSet<String>(existing.size)
+        var indexed = 0
+        var reindexed = 0
+
+        // Stream the remote listing, applying each page as it arrives.
+        val listedOk = try {
+            source.listPhotos { page ->
+                val toInsert = ArrayList<PhotoEntity>(page.size)
+                for (photo in page) {
+                    if (!seen.add(photo.remoteId)) continue
+                    val have = existing[photo.remoteId]
+                    when (SyncDiff.classify(photo.contentHash, have?.contentHash, have != null)) {
+                        SyncDiff.Action.INSERT -> toInsert += photo.toIndexRow(sourceId)
+                        SyncDiff.Action.REINDEX -> {
+                            have?.localPath?.let { runCatching { File(it).delete() } }
+                            photoDao.reindexChanged(
+                                sourceId = sourceId,
+                                remoteId = photo.remoteId,
+                                takenAt = photo.takenAt?.toEpochMilli(),
+                                width = photo.width,
+                                height = photo.height,
+                                locationLabel = photo.locationLabel,
+                                contentHash = photo.contentHash,
+                            )
+                            reindexed++
+                        }
+                        SyncDiff.Action.SKIP -> {}
+                    }
+                }
+                if (toInsert.isNotEmpty()) {
+                    photoDao.insertNew(toInsert) // incremental: visible to the slideshow right away
+                    indexed += toInsert.size
+                }
+            }
+            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "listPhotos failed for $sourceId", e)
-            return@withContext offlineOutcome(sourceId, e.message ?: "Could not reach source")
+            false
         }
 
-        // 2. Diff against the local index (loaded via keyset paging so a 60k single-source library
-        //    doesn't overflow the CursorWindow).
-        val existing = loadExistingIndex(sourceId)
-        val existingById = existing.associateBy { it.remoteId }
-        val plan = SyncDiff.plan(
-            remote = remote,
-            existing = existing.map { ExistingPhoto(it.remoteId, it.contentHash) },
-            deletionPolicy = deletionPolicy,
-        )
-
-        // 3. Insert new index rows (no download — the prefetcher fetches on demand).
-        if (plan.toInsert.isNotEmpty()) {
-            photoDao.insertNew(plan.toInsert.map { it.toIndexRow(sourceId) })
-        }
-
-        // 4. Re-index changed content: drop the stale file, flip back to INDEXED, adopt new metadata.
-        for (photo in plan.toReindex) {
-            existingById[photo.remoteId]?.localPath?.let { runCatching { File(it).delete() } }
-            photoDao.reindexChanged(
-                sourceId = sourceId,
-                remoteId = photo.remoteId,
-                takenAt = photo.takenAt?.toEpochMilli(),
-                width = photo.width,
-                height = photo.height,
-                locationLabel = photo.locationLabel,
-                contentHash = photo.contentHash,
+        // On a failed/partial listing, leave the index intact — never mirror-delete what we didn't see.
+        if (!listedOk) {
+            return@withContext outcome(
+                sourceId, indexed, reindexed, 0,
+                SourceHealth(SourceHealthStatus.OFFLINE, "Could not reach source"),
             )
         }
 
-        // 5. Mirror deletions: remove the row and its file.
-        if (plan.toDelete.isNotEmpty()) {
-            plan.toDelete.forEach { remoteId ->
-                existingById[remoteId]?.localPath?.let { runCatching { File(it).delete() } }
+        // Mirror deletions: indexed photos the full listing didn't cover.
+        val toDelete = SyncDiff.toDelete(existing.keys, seen, deletionPolicy)
+        if (toDelete.isNotEmpty()) {
+            toDelete.forEach { remoteId ->
+                existing[remoteId]?.localPath?.let { runCatching { File(it).delete() } }
             }
-            photoDao.deleteFromSource(sourceId, plan.toDelete)
+            photoDao.deleteFromSource(sourceId, toDelete)
         }
 
-        val indexedCount = photoDao.countForSource(sourceId)
-        val cachedCount = photoDao.cachedCountForSource(sourceId)
-        SyncOutcome(
-            indexed = plan.toInsert.size,
-            reindexed = plan.toReindex.size,
-            removed = plan.toDelete.size,
-            health = SourceHealth.OK,
-            indexedCount = indexedCount,
-            cachedCount = cachedCount,
-        )
+        outcome(sourceId, indexed, reindexed, toDelete.size, SourceHealth.OK)
     }
 
-    /** Load the whole per-source index as light rows, page by page (CursorWindow-safe). */
-    private suspend fun loadExistingIndex(sourceId: String): List<SourceIndexRow> {
-        val out = ArrayList<SourceIndexRow>()
+    private suspend fun outcome(
+        sourceId: String,
+        indexed: Int,
+        reindexed: Int,
+        removed: Int,
+        health: SourceHealth,
+    ): SyncOutcome = SyncOutcome(
+        indexed = indexed,
+        reindexed = reindexed,
+        removed = removed,
+        health = health,
+        indexedCount = photoDao.countForSource(sourceId),
+        cachedCount = photoDao.cachedCountForSource(sourceId),
+    )
+
+    /** Load the whole per-source index into [into], page by page (CursorWindow-safe). */
+    private suspend fun loadExistingIndexInto(into: HashMap<String, SourceIndexRow>, sourceId: String) {
         var after = ""
         while (true) {
             val page = photoDao.sourceIndexPage(sourceId, after, INDEX_PAGE_SIZE)
             if (page.isEmpty()) break
-            out += page
+            page.forEach { into[it.remoteId] = it }
             after = page.last().remoteId
             if (page.size < INDEX_PAGE_SIZE) break
         }
-        return out
-    }
-
-    private suspend fun offlineOutcome(sourceId: String, message: String): SyncOutcome {
-        val indexedCount = photoDao.countForSource(sourceId)
-        val cachedCount = photoDao.cachedCountForSource(sourceId)
-        return SyncOutcome(
-            indexed = 0,
-            reindexed = 0,
-            removed = 0,
-            health = SourceHealth(SourceHealthStatus.OFFLINE, message),
-            indexedCount = indexedCount,
-            cachedCount = cachedCount,
-        )
     }
 
     private fun RemotePhoto.toIndexRow(sourceId: String): PhotoEntity = PhotoEntity(

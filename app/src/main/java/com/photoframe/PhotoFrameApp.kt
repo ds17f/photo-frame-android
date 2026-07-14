@@ -26,15 +26,22 @@ class PhotoFrameApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         CrashRestartHandler.install(this)
-        // On every launch (boot, crash-restart, cold start): ensure the periodic job exists and
-        // kick an immediate catch-up sync if any source is configured — so the frame repopulates
-        // after a restart without waiting up to a full interval (§6/§10). Both are idempotent.
+        // On every launch (boot, crash-restart, cold start): ensure the periodic job exists, and
+        // kick an immediate catch-up sync ONLY if a source is stale — never synced, or last synced
+        // longer ago than the sync interval (i.e. the frame was off and the periodic job missed a
+        // run). A full metadata listing over a large library is expensive (§6), so re-running it on
+        // every warm launch would jank startup for no benefit; the periodic job keeps it fresh.
         appScope.launch {
             runCatching {
-                SyncScheduler.reschedule(this@PhotoFrameApp, container.syncSettingsRepository.current())
-                if (container.sourceRepository.listEnabled().isNotEmpty()) {
-                    SyncScheduler.syncNow(this@PhotoFrameApp)
+                val settings = container.syncSettingsRepository.current()
+                SyncScheduler.reschedule(this@PhotoFrameApp, settings)
+                val sources = container.sourceRepository.listEnabled()
+                val staleBefore = System.currentTimeMillis() - settings.syncIntervalMinutes * 60_000L
+                val needsCatchUp = sources.any { s ->
+                    val last = s.lastSyncAt?.toEpochMilli()
+                    last == null || last < staleBefore
                 }
+                if (needsCatchUp) SyncScheduler.syncNow(this@PhotoFrameApp)
             }
         }
     }

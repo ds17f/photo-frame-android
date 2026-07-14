@@ -18,8 +18,14 @@ interface PhotoSource {
     /** Cheap reachability/validity probe surfaced on the source status screen (§5.1). */
     suspend fun healthCheck(): SourceHealth
 
-    /** The full desired photo set for the current selection config. */
-    suspend fun listPhotos(): List<RemotePhoto>
+    /**
+     * Stream the desired photo set page by page (streaming-cache model, docs/STORAGE_PLAN.md).
+     * Emitting incrementally lets the sync engine index — and the prefetcher start pulling — the
+     * first photos within seconds instead of after the whole (potentially 60k+) listing completes,
+     * and lets each page be garbage-collected rather than holding the entire library in memory at
+     * once. [onPage] runs on the caller's dispatcher and must not retain the list.
+     */
+    suspend fun listPhotos(onPage: suspend (List<RemotePhoto>) -> Unit)
 
     /** Download [photo] at display size and stream the bytes into [sink]. */
     suspend fun fetch(photo: RemotePhoto, sink: Sink)

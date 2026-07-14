@@ -6,6 +6,7 @@ import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.HTTP
 import retrofit2.http.Path
 import retrofit2.http.POST
 import retrofit2.http.Query
@@ -49,7 +50,22 @@ interface ImmichApi {
         @Path("id") id: String,
         @Query("size") size: String = "preview",
     ): Response<ResponseBody>
+
+    /**
+     * Delete assets. `force=false` moves them to the Immich trash (recoverable); requires the
+     * `asset.delete` permission on the API key (verified: 403 "Missing required permission:
+     * asset.delete" otherwise). Returns 204 on success.
+     */
+    @HTTP(method = "DELETE", path = "api/assets", hasBody = true)
+    suspend fun deleteAssets(@Body body: ImmichDeleteDto): Response<Unit>
 }
+
+@Serializable
+data class ImmichDeleteDto(
+    val ids: List<String>,
+    /** false = trash (recoverable), true = permanent. The frame trashes. */
+    val force: Boolean = false,
+)
 
 // ---- DTOs (only the fields the app uses; ignoreUnknownKeys tolerates the rest) --------------
 

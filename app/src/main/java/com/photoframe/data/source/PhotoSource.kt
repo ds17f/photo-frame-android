@@ -23,6 +23,17 @@ interface PhotoSource {
 
     /** Download [photo] at display size and stream the bytes into [sink]. */
     suspend fun fetch(photo: RemotePhoto, sink: Sink)
+
+    /** Whether this source supports deleting a remote asset (from the frame). */
+    val canDelete: Boolean get() = false
+
+    /**
+     * Delete [remoteId] at the source (default: unsupported → throws). Immich moves it to trash;
+     * picker/shared-album sources can't delete. Throws with a user-facing message on failure so
+     * the caller can surface it (e.g. a missing `asset.delete` permission).
+     */
+    suspend fun deleteRemote(remoteId: String): Unit =
+        throw UnsupportedOperationException("This source can't delete photos")
 }
 
 /**

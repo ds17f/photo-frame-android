@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.photoframe.PhotoFrameApp
+import com.photoframe.data.SourceType
 import com.photoframe.data.db.SyncLogEntity
 import com.photoframe.data.source.ConfiguredSource
 import com.photoframe.data.source.ImmichConfig
@@ -86,14 +87,24 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
         // flow pre-filled and auto-test so the user never types the API key on the tablet.
         viewModelScope.launch {
             val payload = withContext(Dispatchers.IO) { ImmichImport.consume(getApplication()) }
-            if (payload != null) {
-                _setup.value = ImmichSetupState(
-                    name = payload.name,
+                ?: return@launch
+            // If an Immich source with this URL already exists, edit it (rotating the key — e.g.
+            // to one that adds asset.delete) instead of creating a duplicate.
+            val existing = sourceRepository.listAll().firstOrNull {
+                it.type == SourceType.IMMICH && it.immichConfig?.baseUrl == payload.baseUrl
+            }
+            _setup.value = if (existing != null) {
+                ImmichSetupState(
+                    editingId = existing.id,
+                    name = existing.displayName,
                     baseUrl = payload.baseUrl,
                     apiKey = payload.apiKey,
+                    selection = existing.immichConfig?.selection ?: ImmichSelection(),
                 )
-                testAndLoad()
+            } else {
+                ImmichSetupState(name = payload.name, baseUrl = payload.baseUrl, apiKey = payload.apiKey)
             }
+            testAndLoad()
         }
     }
 

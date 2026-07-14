@@ -8,8 +8,10 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +32,8 @@ import com.photoframe.ui.diagnostics.DiagnosticsScreen
 import com.photoframe.ui.overlay.CaptionOverlay
 import com.photoframe.ui.overlay.ClockOverlay
 import com.photoframe.ui.overlay.OverlayLayout
+import com.photoframe.ui.model.UiPhoto
+import com.photoframe.ui.model.UiSlide
 import com.photoframe.ui.render.SlideRenderer
 import com.photoframe.ui.settings.DisplaySettingsScreen
 import com.photoframe.ui.settings.SettingsHomeScreen
@@ -44,6 +48,25 @@ private enum class Screen { SLIDESHOW, SETTINGS_HOME, DISPLAY, SOURCES, CACHE, D
 
 /** Swipe distance (px) past which a horizontal drag counts as prev/next. */
 private const val SWIPE_THRESHOLD = 120f
+
+/**
+ * Which photo sits under a long-press: the single photo, or the correct half of a split (left/
+ * right on a landscape frame, top/bottom on a portrait frame — matching PairSlide's layout).
+ */
+private fun pickPhotoAt(
+    slide: UiSlide?,
+    offset: androidx.compose.ui.geometry.Offset,
+    size: androidx.compose.ui.unit.IntSize,
+    isLandscape: Boolean,
+): com.photoframe.ui.model.UiPhoto? = when (slide) {
+    is UiSlide.Single -> slide.photo
+    is UiSlide.Pair -> if (isLandscape) {
+        if (offset.x < size.width / 2f) slide.left else slide.right
+    } else {
+        if (offset.y < size.height / 2f) slide.left else slide.right
+    }
+    null -> null
+}
 
 /**
  * Top-level UI: the slideshow, the first-run wizard, and in-app navigation to the settings
@@ -68,7 +91,15 @@ fun SlideshowRoute(onExit: () -> Unit) {
     val setup by sourcesVm.setup.collectAsState()
 
     var screen by remember { mutableStateOf(Screen.SLIDESHOW) }
+    var pendingDelete by remember { mutableStateOf<UiPhoto?>(null) }
     val context = LocalContext.current
+
+    // Surface one-shot messages (delete results) as toasts.
+    LaunchedEffect(Unit) {
+        slideshowVm.events.collect { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Keep the engine's pairing axis in sync with the live screen orientation (DESIGN §8).
     val orientation = LocalConfiguration.current.orientation
@@ -178,7 +209,23 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onPrevious = { slideshowVm.previous() },
                 onTogglePause = { slideshowVm.togglePause() },
                 onOpenSettings = { slideshowVm.hideControls(); screen = Screen.SETTINGS_HOME },
+                onRequestDelete = { pendingDelete = it },
             )
+            pendingDelete?.let { photo ->
+                AlertDialog(
+                    onDismissRequest = { pendingDelete = null },
+                    title = { Text("Delete this photo?") },
+                    text = { Text("It will be moved to the Immich trash — you can restore it there.") },
+                    confirmButton = {
+                        TextButton(onClick = { slideshowVm.deletePhoto(photo); pendingDelete = null }) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+                    },
+                )
+            }
         }
     }
 }
@@ -219,12 +266,23 @@ private fun SlideshowContent(
     onPrevious: () -> Unit,
     onTogglePause: () -> Unit,
     onOpenSettings: () -> Unit,
+    onRequestDelete: (com.photoframe.ui.model.UiPhoto) -> Unit,
 ) {
+    val isLandscape =
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) }
+            .pointerInput(state.slide, isLandscape) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    // Long-press a photo (or one side of a split) to delete it (§11 extension).
+                    onLongPress = { offset ->
+                        pickPhotoAt(state.slide, offset, size, isLandscape)?.let(onRequestDelete)
+                    },
+                )
+            }
             .pointerInput(Unit) {
                 var dragTotal = 0f
                 detectHorizontalDragGestures(

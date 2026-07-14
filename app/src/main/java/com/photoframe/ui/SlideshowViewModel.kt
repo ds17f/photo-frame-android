@@ -15,14 +15,19 @@ import com.photoframe.settings.DisplaySettings
 import com.photoframe.settings.DisplaySettingsRepository
 import com.photoframe.ui.model.UiPhoto
 import com.photoframe.ui.model.UiSlide
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Duration
 
 data class SlideshowUiState(
@@ -45,6 +50,12 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private val photoRepository: PhotoRepository = container.photoRepository
     private val settingsRepository: DisplaySettingsRepository = container.displaySettingsRepository
     private val fixtureImporter: FixtureImporter = container.fixtureImporter
+    private val sourceRepository = container.sourceRepository
+    private val photoSourceFactory = container.photoSourceFactory
+
+    /** One-shot user messages (e.g. delete result) for the UI to surface as a toast. */
+    private val _events = Channel<String>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     private val engine = PlaylistEngine()
 
@@ -114,6 +125,37 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         val paused = !_uiState.value.isPaused
         _uiState.value = _uiState.value.copy(isPaused = paused)
         if (paused) advanceJob?.cancel() else restartAdvanceLoop()
+    }
+
+    /**
+     * Delete a photo (single or one side of a pair) from its source — Immich moves it to trash —
+     * then drop it from the local cache and advance off it. Surfaces the result via [events].
+     */
+    fun deletePhoto(photo: UiPhoto) {
+        val entity = photoIndex[photo.id] ?: return
+        viewModelScope.launch {
+            val configured = sourceRepository.byId(entity.sourceId)
+            val source = configured?.let { photoSourceFactory.create(it) }
+            if (source == null || !source.canDelete) {
+                _events.send("This source can't delete photos")
+                return@launch
+            }
+            val result = runCatching { source.deleteRemote(entity.remoteId) }
+            if (result.isSuccess) {
+                withContext(Dispatchers.IO) { runCatching { File(entity.localPath).delete() } }
+                photoRepository.deleteFromSource(entity.sourceId, listOf(entity.remoteId))
+                if (currentSlideContains(photo.id)) advance(forward = true)
+                _events.send("Moved to Immich trash")
+            } else {
+                _events.send(result.exceptionOrNull()?.message ?: "Delete failed")
+            }
+        }
+    }
+
+    private fun currentSlideContains(id: String): Boolean = when (val s = _uiState.value.slide) {
+        is UiSlide.Single -> s.photo.id == id
+        is UiSlide.Pair -> s.left.id == id || s.right.id == id
+        null -> false
     }
 
     fun showControls() {

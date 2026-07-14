@@ -7,6 +7,7 @@ import com.photoframe.data.db.PhotoFrameDatabase
 import com.photoframe.data.fixture.FixtureImporter
 import com.photoframe.data.secrets.EncryptedSecrets
 import com.photoframe.data.source.SourceRepository
+import com.photoframe.data.sync.PhotoSourceFactory
 import com.photoframe.data.sync.SyncManager
 import com.photoframe.settings.DisplaySettingsRepository
 import com.photoframe.settings.SyncSettingsRepository
@@ -25,6 +26,7 @@ class AppContainer(context: Context) {
     val sourceRepository: SourceRepository by lazy {
         SourceRepository(database.sourceDao(), secrets)
     }
+    val photoSourceFactory: PhotoSourceFactory by lazy { PhotoSourceFactory(sourceRepository) }
     val fixtureImporter: FixtureImporter by lazy {
         FixtureImporter(appContext, cache, photoRepository)
     }

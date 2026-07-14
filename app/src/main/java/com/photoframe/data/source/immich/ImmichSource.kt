@@ -92,6 +92,17 @@ class ImmichSource(
         }
     }
 
+    override val canDelete: Boolean get() = true
+
+    /** Move the asset to the Immich trash (recoverable). Throws with a clear message on failure. */
+    override suspend fun deleteRemote(remoteId: String) {
+        val response = api.deleteAssets(ImmichDeleteDto(ids = listOf(remoteId), force = false))
+        if (!response.isSuccessful) {
+            val hint = if (response.code() == 403) " — API key needs the asset.delete permission" else ""
+            error("Delete failed (HTTP ${response.code()})$hint")
+        }
+    }
+
     /**
      * Page through metadata search (newest-first), filtering to displayable images. Bounded by
      * [MAX_LIST_ITEMS] so a huge whole-library selection (the owner's is ~60k) doesn't hold the

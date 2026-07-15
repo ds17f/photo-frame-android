@@ -32,6 +32,29 @@ data class ImmichConfig(
     override val type: SourceType get() = SourceType.IMMICH
 }
 
+/**
+ * Google Photos Picker source config (DESIGN §5.2). Photos are acquired eagerly during a pick
+ * session (baseURLs expire), so — unlike Immich — there is no server-side "selection" to re-derive;
+ * the picked set stored locally *is* the source of truth. The OAuth **client secret** and **refresh
+ * token** are held in [com.photoframe.data.secrets.EncryptedSecrets]; only the non-secret client id
+ * and pick bookkeeping live here.
+ *
+ * OAuth uses a **Desktop-type** client + loopback redirect (Google deprecated custom-scheme and
+ * loopback for the Android client type, and the device flow disallows the Picker scope — see
+ * docs/API_NOTES.md). [clientId] therefore identifies a Desktop client.
+ */
+@Serializable
+@SerialName("gphotos_picker")
+data class GPhotosPickerConfig(
+    val clientId: String,
+    /** How many photos are currently in this source's picked set (for "N photos" in the UI). */
+    val pickedCount: Int = 0,
+    /** When the user last completed a pick (epoch millis), for "picked <date>". */
+    val lastPickedAt: Long? = null,
+) : SourceConfig {
+    override val type: SourceType get() = SourceType.GPHOTOS_PICKER
+}
+
 @Serializable
 data class ImmichSelection(
     val albumIds: List<String> = emptyList(),

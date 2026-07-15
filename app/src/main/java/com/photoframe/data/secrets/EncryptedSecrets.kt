@@ -33,14 +33,36 @@ class EncryptedSecrets(context: Context) {
         prefs.edit().putString(immichApiKeyName(sourceId), apiKey).apply()
     }
 
+    // ---- Google Photos Picker (OAuth) -------------------------------------------------------
+    // Desktop-type client: the "secret" is non-confidential (shipped in installed apps) but we
+    // still keep it out of the plaintext config JSON. The refresh token is a real secret (§12).
+
+    fun getGphotosRefreshToken(sourceId: String): String? =
+        prefs.getString(gphotosRefreshTokenName(sourceId), null)
+
+    fun setGphotosRefreshToken(sourceId: String, token: String) {
+        prefs.edit().putString(gphotosRefreshTokenName(sourceId), token).apply()
+    }
+
+    fun getGphotosClientSecret(sourceId: String): String? =
+        prefs.getString(gphotosClientSecretName(sourceId), null)
+
+    fun setGphotosClientSecret(sourceId: String, secret: String) {
+        prefs.edit().putString(gphotosClientSecretName(sourceId), secret).apply()
+    }
+
     /** Remove every secret owned by a source when it is deleted. */
     fun clearForSource(sourceId: String) {
         prefs.edit()
             .remove(immichApiKeyName(sourceId))
+            .remove(gphotosRefreshTokenName(sourceId))
+            .remove(gphotosClientSecretName(sourceId))
             .apply()
     }
 
     private fun immichApiKeyName(sourceId: String) = "immich_api_key.$sourceId"
+    private fun gphotosRefreshTokenName(sourceId: String) = "gphotos_refresh_token.$sourceId"
+    private fun gphotosClientSecretName(sourceId: String) = "gphotos_client_secret.$sourceId"
 
     private companion object {
         const val FILE_NAME = "photoframe_secrets"

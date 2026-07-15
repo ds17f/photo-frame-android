@@ -37,7 +37,7 @@ class SyncManager(
     private val prefetcher: PhotoPrefetcher,
     private val evictor: CacheEvictor,
 ) {
-    private val factory = PhotoSourceFactory(sourceRepository)
+    private val factory = PhotoSourceFactory(sourceRepository, photoDao)
     private val syncer = MetadataSyncer(photoDao, cache)
 
     /**
@@ -57,7 +57,14 @@ class SyncManager(
         var synced = 0
 
         for (source in sources) {
-            val outcome = syncOne(source, settings.deletionPolicy) ?: continue
+            // Picker photos are the local source of truth (grants expire) — never mirror-delete
+            // them (DESIGN §5.2/§6), regardless of the global deletion policy.
+            val policy = if (source.type == com.photoframe.data.SourceType.GPHOTOS_PICKER) {
+                com.photoframe.data.source.DeletionPolicy.KEEP_UNTIL_EVICTED
+            } else {
+                settings.deletionPolicy
+            }
+            val outcome = syncOne(source, policy) ?: continue
             synced++
             indexed += outcome.indexed
             reindexed += outcome.reindexed

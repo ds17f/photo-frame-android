@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.photoframe.data.SourceType
 import com.photoframe.data.source.ConfiguredSource
 import com.photoframe.data.source.SourceHealthStatus
 import java.time.Duration
@@ -55,7 +58,9 @@ fun SourcesScreen(
     sources: List<ConfiguredSource>,
     onBack: () -> Unit,
     onAddImmich: () -> Unit,
+    onAddGphotos: () -> Unit,
     onEdit: (ConfiguredSource) -> Unit,
+    onPickMore: (ConfiguredSource) -> Unit,
     onToggle: (String, Boolean) -> Unit,
     onDelete: (String) -> Unit,
     onSyncNow: () -> Unit,
@@ -73,9 +78,7 @@ fun SourcesScreen(
                     IconButton(onClick = onSyncNow) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Sync now")
                     }
-                    IconButton(onClick = onAddImmich) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add source")
-                    }
+                    AddSourceMenu(onAddImmich = onAddImmich, onAddGphotos = onAddGphotos)
                 },
             )
         },
@@ -89,12 +92,13 @@ fun SourcesScreen(
                 Text("No photo sources yet", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.size(8.dp))
                 Text(
-                    "Add your Immich server to start the slideshow.",
+                    "Add your Immich server, or pick from Google Photos, to start the slideshow.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.size(16.dp))
                 TextButton(onClick = onAddImmich) { Text("Add Immich source") }
+                TextButton(onClick = onAddGphotos) { Text("Add Google Photos") }
             }
         } else {
             LazyColumn(
@@ -106,6 +110,7 @@ fun SourcesScreen(
                     SourceCard(
                         source = source,
                         onEdit = { onEdit(source) },
+                        onPickMore = { onPickMore(source) },
                         onToggle = { onToggle(source.id, it) },
                         onDelete = { onDelete(source.id) },
                     )
@@ -116,12 +121,34 @@ fun SourcesScreen(
 }
 
 @Composable
+private fun AddSourceMenu(onAddImmich: () -> Unit, onAddGphotos: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Filled.Add, contentDescription = "Add source")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Add Immich") },
+                onClick = { expanded = false; onAddImmich() },
+            )
+            DropdownMenuItem(
+                text = { Text("Add Google Photos") },
+                onClick = { expanded = false; onAddGphotos() },
+            )
+        }
+    }
+}
+
+@Composable
 private fun SourceCard(
     source: ConfiguredSource,
     onEdit: () -> Unit,
+    onPickMore: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onDelete: () -> Unit,
 ) {
+    val isGphotos = source.type == SourceType.GPHOTOS_PICKER
     var confirmDelete by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
@@ -161,8 +188,12 @@ private fun SourceCard(
                     TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
                     TextButton(onClick = onDelete) { Text("Remove") }
                 } else {
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                    if (isGphotos) {
+                        TextButton(onClick = onPickMore) { Text("Add more photos") }
+                    } else {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                        }
                     }
                     IconButton(onClick = { confirmDelete = true }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Delete")
@@ -186,6 +217,13 @@ private fun HealthDot(status: SourceHealthStatus) {
 
 private fun statusLine(source: ConfiguredSource): String {
     val count = "${source.photoCount} photo${if (source.photoCount == 1) "" else "s"}"
+    // Picker sources are defined by when the user last picked, not by a server sync (DESIGN §5.2).
+    source.gphotosConfig?.let { config ->
+        val picked = config.lastPickedAt
+            ?.let { "picked ${relativeTime(Instant.ofEpochMilli(it))}" }
+            ?: "no photos picked yet"
+        return "$count · $picked"
+    }
     val synced = source.lastSyncAt?.let { "synced ${relativeTime(it)}" } ?: "never synced"
     return "$count · $synced"
 }

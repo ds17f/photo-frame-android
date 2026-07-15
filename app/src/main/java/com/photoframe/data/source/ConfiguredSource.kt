@@ -20,6 +20,7 @@ data class ConfiguredSource(
     val photoCount: Int,
 ) {
     val immichConfig: ImmichConfig? get() = config as? ImmichConfig
+    val gphotosConfig: GPhotosPickerConfig? get() = config as? GPhotosPickerConfig
 
     companion object {
         fun fromEntity(entity: SourceEntity): ConfiguredSource = ConfiguredSource(

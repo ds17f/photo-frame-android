@@ -7,10 +7,14 @@ import com.photoframe.PhotoFrameApp
 import com.photoframe.data.SourceType
 import com.photoframe.data.db.SyncLogEntity
 import com.photoframe.data.source.ConfiguredSource
+import com.photoframe.data.source.GPhotosPickerConfig
 import com.photoframe.data.source.ImmichConfig
 import com.photoframe.data.source.ImmichSelection
 import com.photoframe.data.source.SourceHealth
 import com.photoframe.data.source.SourceHealthStatus
+import com.photoframe.data.source.gphotos.GPhotosAuth
+import com.photoframe.data.source.gphotos.GPhotosPickerApi
+import com.photoframe.data.source.gphotos.GPhotosPickerSession
 import com.photoframe.data.source.immich.ImmichAlbumDto
 import com.photoframe.data.source.immich.ImmichCatalog
 import com.photoframe.data.source.immich.ImmichImport
@@ -43,6 +47,33 @@ data class ImmichSetupState(
 ) {
     val connected: Boolean get() = connection?.status == SourceHealthStatus.OK
     val canSave: Boolean get() = connected && name.isNotBlank() && !selection.isEmpty && !saving
+}
+
+/** Where the Google Photos add/pick flow is (DESIGN §5.2). */
+enum class GPhotosPhase { CONFIG, SIGNING_IN, SESSION, DOWNLOADING, DONE }
+
+/**
+ * In-progress Google Photos Picker add / "add more photos" flow (DESIGN §5.2). One-time sign-in
+ * happens on the tablet (loopback OAuth); each pick is scanned on the phone from the picker QR.
+ */
+data class GPhotosSetupState(
+    /** Non-null once the source exists (editing / "add more" / after a fresh sign-in created it). */
+    val sourceId: String? = null,
+    val name: String = "",
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val phase: GPhotosPhase = GPhotosPhase.CONFIG,
+    /** Replace the existing picked set instead of appending. */
+    val replace: Boolean = false,
+    val pickerUri: String? = null,
+    val downloadedDone: Int = 0,
+    val downloadedTotal: Int = 0,
+    val addedCount: Int? = null,
+    val error: String? = null,
+) {
+    val canSignIn: Boolean
+        get() = name.isNotBlank() && clientId.isNotBlank() && clientSecret.isNotBlank() &&
+            phase == GPhotosPhase.CONFIG
 }
 
 /**
@@ -189,6 +220,133 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
             ensureScheduledAndSyncNow()
             _setup.value = null
         }
+    }
+
+    // ---- Google Photos Picker flow --------------------------------------------------------
+
+    private val _gphotos = MutableStateFlow<GPhotosSetupState?>(null)
+    val gphotos: StateFlow<GPhotosSetupState?> = _gphotos.asStateFlow()
+
+    private val gphotosApi by lazy { GPhotosPickerApi.create() }
+    @Volatile private var pickCancelled = false
+
+    /** Begin adding a new Google Photos source (pre-fill the client id from an existing one). */
+    fun beginAddGphotos() {
+        val existingClientId = sources.value
+            .firstOrNull { it.type == SourceType.GPHOTOS_PICKER }?.gphotosConfig?.clientId
+            .orEmpty()
+        _gphotos.value = GPhotosSetupState(clientId = existingClientId)
+    }
+
+    /** "Add more photos" on an existing Google source — skip sign-in, go straight to a pick. */
+    fun beginPickMore(source: ConfiguredSource) {
+        val config = source.gphotosConfig ?: return
+        _gphotos.value = GPhotosSetupState(
+            sourceId = source.id,
+            name = source.displayName,
+            clientId = config.clientId,
+            phase = GPhotosPhase.SESSION,
+        )
+        startPickSession(source.id)
+    }
+
+    fun editGphotosName(value: String) = _gphotos.update { it.copy(name = value, error = null) }
+    fun editGphotosClientId(value: String) = _gphotos.update { it.copy(clientId = value, error = null) }
+    fun editGphotosClientSecret(value: String) = _gphotos.update { it.copy(clientSecret = value, error = null) }
+    fun setGphotosReplace(on: Boolean) = _gphotos.update { it.copy(replace = on) }
+
+    fun cancelGphotos() {
+        pickCancelled = true
+        _gphotos.value = null
+    }
+
+    /** Launch the tablet-browser sign-in, create the source on success, then start a pick session. */
+    fun signInGphotos() {
+        val state = _gphotos.value ?: return
+        if (!state.canSignIn) return
+        _gphotos.update { it.copy(phase = GPhotosPhase.SIGNING_IN, error = null) }
+        viewModelScope.launch {
+            try {
+                val tokens = GPhotosAuth.authorize(
+                    getApplication(), state.clientId.trim(), state.clientSecret.trim(),
+                )
+                val refresh = tokens.refreshToken ?: throw GPhotosAuth.AuthException(
+                    "Google didn't return a refresh token. Set the OAuth consent screen to " +
+                        "\"Production\" (Testing tokens expire), then sign in again.",
+                )
+                val id = sourceRepository.addGphotosSource(
+                    displayName = state.name.trim(),
+                    config = GPhotosPickerConfig(clientId = state.clientId.trim()),
+                    clientSecret = state.clientSecret.trim(),
+                    refreshToken = refresh,
+                )
+                _gphotos.update { it.copy(sourceId = id, phase = GPhotosPhase.SESSION) }
+                startPickSession(id)
+            } catch (e: Exception) {
+                _gphotos.update {
+                    it.copy(phase = GPhotosPhase.CONFIG, error = e.message ?: "Sign-in failed")
+                }
+            }
+        }
+    }
+
+    /** Create a picker session, wait for the phone pick, download every item, then finish. */
+    private fun startPickSession(sourceId: String) {
+        pickCancelled = false
+        viewModelScope.launch {
+            try {
+                val session = GPhotosPickerSession(
+                    sourceId = sourceId,
+                    api = gphotosApi,
+                    cache = container.cache,
+                    photoDao = container.database.photoDao(),
+                    accessTokenProvider = tokenProvider(sourceId),
+                )
+                val info = session.createSession()
+                _gphotos.update { it.copy(pickerUri = info.pickerUri, error = null) }
+
+                val picked = session.awaitPicked(info) { !pickCancelled && _gphotos.value != null }
+                if (!picked) {
+                    session.deleteSession(info.sessionId)
+                    if (!pickCancelled) {
+                        _gphotos.update { it.copy(error = "Picking timed out — try again") }
+                    }
+                    return@launch
+                }
+
+                _gphotos.update { it.copy(phase = GPhotosPhase.DOWNLOADING) }
+                val replace = _gphotos.value?.replace ?: false
+                val added = session.downloadPicked(info, replace) { done, total ->
+                    _gphotos.update { it.copy(downloadedDone = done, downloadedTotal = total) }
+                }
+                session.deleteSession(info.sessionId)
+
+                val count = container.database.photoDao().countForSource(sourceId)
+                sourceRepository.recordGphotosPick(sourceId, count, System.currentTimeMillis())
+                ensureScheduledAndSyncNow()
+                _gphotos.update { it.copy(phase = GPhotosPhase.DONE, addedCount = added) }
+            } catch (e: Exception) {
+                _gphotos.update { it.copy(error = e.message ?: "Picking failed") }
+            }
+        }
+    }
+
+    /** Fresh-access-token provider backed by the source's stored client secret + refresh token. */
+    private fun tokenProvider(sourceId: String): suspend () -> String = {
+        val config = sourceRepository.byId(sourceId)?.gphotosConfig
+            ?: throw GPhotosAuth.AuthException("Source is missing its Google configuration")
+        val secret = sourceRepository.gphotosClientSecret(sourceId)
+            ?: throw GPhotosAuth.AuthException("Source is missing its Google client secret")
+        val refresh = sourceRepository.gphotosRefreshToken(sourceId)
+            ?: throw GPhotosAuth.AuthException("Not signed in to Google — add the source again")
+        GPhotosAuth.refresh(config.clientId, secret, refresh).accessToken
+    }
+
+    @JvmName("updateGphotos")
+    private inline fun MutableStateFlow<GPhotosSetupState?>.update(
+        crossinline transform: (GPhotosSetupState) -> GPhotosSetupState,
+    ) {
+        value = value?.let(transform)
     }
 
     // ---- Source list actions --------------------------------------------------------------

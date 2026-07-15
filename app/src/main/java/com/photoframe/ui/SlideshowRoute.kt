@@ -49,6 +49,7 @@ import com.photoframe.ui.settings.StorageSettingsScreen
 import com.photoframe.ui.settings.StorageViewModel
 import com.photoframe.ui.settings.SyncSettingsScreen
 import com.photoframe.ui.sources.FirstRunWelcome
+import com.photoframe.ui.sources.GPhotosSetupScreen
 import com.photoframe.ui.sources.ImmichSetupScreen
 import com.photoframe.ui.sources.SourcesScreen
 import com.photoframe.ui.sources.SourcesViewModel
@@ -126,6 +127,7 @@ fun SlideshowRoute(onExit: () -> Unit) {
     val cacheUsage by sourcesVm.cacheUsageBytes.collectAsState()
     val firstRunNeeded by sourcesVm.firstRunNeeded.collectAsState()
     val setup by sourcesVm.setup.collectAsState()
+    val gphotosSetup by sourcesVm.gphotos.collectAsState()
 
     var screen by remember { mutableStateOf(Screen.SLIDESHOW) }
     var menuPhoto by remember { mutableStateOf<UiPhoto?>(null) }      // long-press action menu
@@ -162,6 +164,22 @@ fun SlideshowRoute(onExit: () -> Unit) {
             onWholeLibrary = sourcesVm::setWholeLibrary,
             onRollingWindow = sourcesVm::setRollingWindow,
             onSave = sourcesVm::save,
+        )
+        return
+    }
+
+    // The Google Photos add / "add more photos" flow also takes over the screen when active.
+    val activeGphotos = gphotosSetup
+    if (activeGphotos != null) {
+        BackHandler { sourcesVm.cancelGphotos() }
+        GPhotosSetupScreen(
+            state = activeGphotos,
+            onBack = { sourcesVm.cancelGphotos() },
+            onName = sourcesVm::editGphotosName,
+            onClientId = sourcesVm::editGphotosClientId,
+            onClientSecret = sourcesVm::editGphotosClientSecret,
+            onReplace = sourcesVm::setGphotosReplace,
+            onSignIn = sourcesVm::signInGphotos,
         )
         return
     }
@@ -212,7 +230,9 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 sources = sources,
                 onBack = { screen = Screen.SETTINGS_HOME },
                 onAddImmich = { sourcesVm.beginAddImmich() },
+                onAddGphotos = { sourcesVm.beginAddGphotos() },
                 onEdit = { sourcesVm.beginEditImmich(it) },
+                onPickMore = { sourcesVm.beginPickMore(it) },
                 onToggle = { id, enabled -> sourcesVm.setEnabled(id, enabled) },
                 onDelete = { sourcesVm.delete(it) },
                 onSyncNow = { sourcesVm.syncNow() },

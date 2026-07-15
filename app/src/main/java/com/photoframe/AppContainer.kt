@@ -31,9 +31,20 @@ class AppContainer(context: Context) {
     val sourceRepository: SourceRepository by lazy {
         SourceRepository(database.sourceDao(), secrets)
     }
-    val photoSourceFactory: PhotoSourceFactory by lazy { PhotoSourceFactory(sourceRepository) }
+    val photoSourceFactory: PhotoSourceFactory by lazy {
+        PhotoSourceFactory(sourceRepository, database.photoDao())
+    }
 
-    val cacheEvictor: CacheEvictor by lazy { CacheEvictor(database.photoDao()) }
+    val cacheEvictor: CacheEvictor by lazy {
+        // Pin Picker sources: their evicted files can't be re-downloaded, so they persist until
+        // the user clears them (DESIGN §5.2/§6).
+        CacheEvictor(database.photoDao()) {
+            sourceRepository.listAll()
+                .filter { it.type == com.photoframe.data.SourceType.GPHOTOS_PICKER }
+                .map { it.id }
+                .toSet()
+        }
+    }
     val cacheMaintainer: CacheMaintainer by lazy { CacheMaintainer(database.photoDao(), cache) }
     val storageSettingsRepository: StorageSettingsRepository by lazy {
         StorageSettingsRepository(appContext)

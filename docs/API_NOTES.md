@@ -81,7 +81,44 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
 
 ## Google Photos Picker
 
-_(none yet — Phase 4)_
+**OAuth mechanism — spec (DESIGN §5.2) was wrong; Google deprecated it. Verified 2026-07.**
+DESIGN §5.2 called for AppAuth with a custom-scheme redirect (reversed client id). That no longer
+works with Google:
+- **Custom URI schemes are no longer supported** for the *Android* (and Chrome) OAuth client type.
+- **Loopback redirect is deprecated** for the *Android/iOS/Chrome* client types (Desktop only).
+- Google's recommended replacement is the **Android SDK / Credential Manager**, which requires
+  **Google Play Services** — absent on Fire OS (hard rule).
+- The **device-authorization (limited-input) flow** — the "scan a code, log in on your phone" UX —
+  does **not** allow the Picker scope. Its allowlist is only `email`/`openid`/`profile`,
+  `drive.file`, `drive.appdata`, `youtube[.readonly]`.
+
+**Implemented instead:** a **Desktop-type** OAuth client + **loopback redirect**
+(`http://127.0.0.1:<ephemeral port>`), which is the only browser flow that works with no GMS *and*
+the Picker scope. `GPhotosAuth` binds a short-lived `ServerSocket`, opens the system browser (Silk,
+plain `ACTION_VIEW`) at `accounts.google.com/o/oauth2/v2/auth` with `access_type=offline` +
+`prompt=consent` + PKCE (S256), catches the `?code=` on the socket, and exchanges it at
+`oauth2.googleapis.com/token`. Consequence: the one-time sign-in is **on the tablet** (loopback
+needs same-device browser+server); picking is still phone-QR. The Desktop client secret is shipped
+in the app (non-confidential for installed apps, per Google) but kept in EncryptedSecrets.
+
+**Picker API endpoint shapes — coded to Google's spec; verify on device and correct here.**
+Base `https://photospicker.googleapis.com/v1`, all calls `Authorization: Bearer <access token>`:
+- `POST /sessions` (empty body) → `{ id, pickerUri, mediaItemsSet, pollingConfig{ pollInterval,
+  timeoutIn } }`. `pollInterval`/`timeoutIn` are protobuf Duration strings (e.g. `"5s"`), parsed by
+  stripping the `s`.
+- `GET /sessions/{id}` → same shape; poll until `mediaItemsSet == true`.
+- `GET /mediaItems?sessionId=…&pageSize=…&pageToken=…` → `{ mediaItems[]{ id, createTime, type,
+  mediaFile{ baseUrl, mimeType, filename, mediaFileMetadata{ width, height } } }, nextPageToken }`.
+  Only `type == "PHOTO"` items are kept (videos skipped).
+- `DELETE /sessions/{id}` after downloading.
+- **Downloads:** `GET <baseUrl>=w2048-h2048` with the bearer header, streamed straight into the
+  cache and indexed `READY` immediately (picker baseURLs/grants are short-lived — the local cache is
+  the source of truth; nothing is deferred to the periodic prefetcher).
+
+**Sync-engine integration.** The picker source's `listPhotos` re-emits the already-stored set, so a
+periodic `MetadataSyncer` pass is a no-op diff; picker rows use a non-MIRROR policy and are pinned
+out of `CacheEvictor` (an evicted file could never be re-fetched). `GPhotosPickerSource.fetch`
+throws — it must never be reached.
 
 ## Google Photos shared album (unofficial parser)
 

@@ -118,9 +118,16 @@ official way to read a user's Google Photos content. The trade-off is inherent:
 **the app only ever sees photos the user explicitly picked**, and to add new photos
 the user re-opens the picker. Build the re-pick flow to be as pleasant as possible.
 
-- OAuth 2.0 via AppAuth with scope
-  `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`, custom-scheme
-  redirect, refresh token stored encrypted. No client secret (Android client type).
+- OAuth 2.0 with scope `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`,
+  refresh token stored encrypted. **Mechanism (revised — Google deprecated the original plan; see
+  `docs/API_NOTES.md`):** custom-scheme and loopback redirects are no longer supported for the
+  *Android* OAuth client type, and Google's SDK replacement needs GMS (absent on Fire OS); the
+  device-code flow disallows the Picker scope. The only no-GMS-viable path is a **Desktop-type**
+  OAuth client + **loopback redirect** (`http://127.0.0.1:<ephemeral port>`): the app binds a local
+  socket, opens the browser (Silk-safe `ACTION_VIEW`), catches the `?code=` redirect, and exchanges
+  it with PKCE. The Desktop client secret is non-confidential for installed apps but kept in
+  EncryptedSecrets. **The one-time sign-in therefore happens on the tablet** (loopback is
+  same-device); each photo *pick* below still happens on the phone via QR.
 - Picking flow:
   1. `POST https://photospicker.googleapis.com/v1/sessions` → returns `pickerUri` + polling config.
   2. Show the `pickerUri` **as a QR code on the frame** with the hint "Scan with your
@@ -134,11 +141,12 @@ the user re-opens the picker. Build the re-pick flow to be as pleasant as possib
 - New picks **append** to the source's photo set (dedupe by media item ID); provide a
   "Replace instead of add" toggle in the flow and a way to clear the set.
 - Settings UI shows "N photos, picked <date>" and a prominent "Add more photos" action.
-- **User setup required (document in `docs/GOOGLE_SETUP.md`):** create a Google Cloud
-  project, enable the Photos Picker API, configure the OAuth consent screen, and —
-  critically — set publishing status to **Production** (in Testing mode refresh tokens
-  die after 7 days; the "unverified app" warning during sign-in is fine for personal
-  use). Create an **Android** OAuth client with the app's package name + signing SHA-1.
+- **User setup required (see `docs/GOOGLE_SETUP.md`):** create a Google Cloud project, enable the
+  Photos Picker API, configure the OAuth consent screen, and — critically — set publishing status
+  to **Production** (in Testing mode refresh tokens die after 7 days; the "unverified app" warning
+  during sign-in is fine for personal use). Create a **Desktop app** OAuth client (client ID +
+  secret) — **no package name or SHA-1 needed** (the Android client type's redirects are
+  deprecated; see the OAuth note above).
 
 ### 5.3 GPhotosSharedAlbumSource (unofficial, enables Google auto-sync)
 

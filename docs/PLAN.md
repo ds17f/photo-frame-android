@@ -91,11 +91,13 @@ overnight test; screen reads as "off" in a dark room during quiet hours.
 ## Phase 4 — Google Photos Picker source (official path)
 
 1. `docs/GOOGLE_SETUP.md`: user-facing walkthrough — Cloud project, enable Picker API,
-   consent screen in **Production** publishing status, Android OAuth client (package +
-   SHA-1 of our keystore), unverified-app click-through (§5.2).
-2. AppAuth OAuth flow: custom-scheme redirect, encrypted refresh-token storage, silent
-   refresh, re-auth UX when refresh fails. Must work in Amazon Silk (no Custom Tabs
-   assumption).
+   consent screen in **Production** publishing status, **Desktop** OAuth client (client ID +
+   secret; no package/SHA-1 — the Android client type's redirects are deprecated), unverified-app
+   click-through (§5.2).
+2. OAuth flow: **loopback redirect** (`127.0.0.1`) via a local `ServerSocket` + PKCE + OkHttp token
+   exchange (AppAuth's custom-scheme flow is dead for Google — see `docs/API_NOTES.md`), encrypted
+   refresh-token storage, silent refresh, re-auth UX when refresh fails. Opens the browser with a
+   plain `ACTION_VIEW` so it works in Amazon Silk. One-time sign-in is on the tablet.
 3. Picker session flow (§5.2): create session → QR code on frame + "Open here"
    fallback → poll per `pollingConfig` → page media items → immediate downloads into
    cache → delete session. Append-by-default with replace toggle and clear-all.

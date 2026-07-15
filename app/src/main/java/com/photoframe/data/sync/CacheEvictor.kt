@@ -20,19 +20,28 @@ import java.io.File
  * awaiting its turn" case is already covered by horizon protection. (Protecting *all* never-shown
  * rows, as an earlier design did, let such orphans accumulate past the cap so it couldn't be held.)
  */
-class CacheEvictor(private val photoDao: PhotoDao) {
+class CacheEvictor(
+    private val photoDao: PhotoDao,
+    /**
+     * Source ids whose files must never be evicted — Picker sources, whose photos can't be
+     * re-downloaded once evicted (baseURLs expire), so they persist until the user clears them
+     * (DESIGN §5.2/§6). Resolved per-enforce so newly-added picker sources are covered.
+     */
+    private val pinnedSourceIds: suspend () -> Set<String> = { emptySet() },
+) {
 
     /**
      * Evict files down to [capBytes] if over. [protectedKeys] (the prefetcher's horizon/in-flight
-     * set) are never evicted. Returns bytes freed. Runs on IO.
+     * set) and any [pinnedSourceIds] source are never evicted. Returns bytes freed. Runs on IO.
      */
     suspend fun enforce(capBytes: Long, protectedKeys: Set<String> = emptySet()): Long =
         withContext(Dispatchers.IO) {
             val total = photoDao.totalBytes()
             if (total <= capBytes) return@withContext 0L
 
+            val pinned = pinnedSourceIds()
             val candidates = photoDao.cachedByLeastRecentlyShown(EVICTION_SCAN_LIMIT)
-            val victims = selectVictims(candidates, total, capBytes, protectedKeys)
+            val victims = selectVictims(candidates, total, capBytes, protectedKeys, pinned)
             var freed = 0L
             for (victim in victims) {
                 victim.localPath?.let { path ->
@@ -68,12 +77,14 @@ class CacheEvictor(private val photoDao: PhotoDao) {
             totalBytes: Long,
             capBytes: Long,
             protectedKeys: Set<String> = emptySet(),
+            pinnedSourceIds: Set<String> = emptySet(),
         ): List<EvictionRef> {
             var remaining = totalBytes
             val victims = ArrayList<EvictionRef>()
             for (photo in ordered) {
                 if (remaining <= capBytes) break
                 if (photo.key in protectedKeys) continue // prefetch horizon / in-flight
+                if (photo.sourceId in pinnedSourceIds) continue // Picker photos never evict
                 victims += photo
                 remaining -= photo.sizeBytes
             }

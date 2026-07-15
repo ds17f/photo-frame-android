@@ -54,6 +54,36 @@ class SourceRepository(
         return id
     }
 
+    /**
+     * Create a new Google Photos Picker source, stashing the OAuth client secret + refresh token in
+     * encrypted storage (DESIGN §5.2). Returns its id. Photos are populated separately by the pick
+     * session — this just registers the account so periodic sync keeps (never mirrors) its set.
+     */
+    suspend fun addGphotosSource(
+        displayName: String,
+        config: GPhotosPickerConfig,
+        clientSecret: String,
+        refreshToken: String,
+    ): String {
+        val id = "gphotos-" + UUID.randomUUID().toString().take(8)
+        secrets.setGphotosClientSecret(id, clientSecret)
+        secrets.setGphotosRefreshToken(id, refreshToken)
+        sourceDao.upsert(
+            SourceEntity(
+                id = id,
+                type = config.type.name,
+                displayName = displayName,
+                enabled = true,
+                configJson = config.toJson(),
+                health = SourceHealthStatus.UNKNOWN.name,
+                lastSyncAt = null,
+                lastError = null,
+                photoCount = 0,
+            ),
+        )
+        return id
+    }
+
     /** Replace an existing source's non-secret config; optionally rotate its API key. */
     suspend fun updateConfig(
         id: String,
@@ -71,6 +101,21 @@ class SourceRepository(
         )
     }
 
+    /** Record a completed pick: bump the picked count + timestamp on the source's config. */
+    suspend fun recordGphotosPick(id: String, pickedCount: Int, lastPickedAtMillis: Long) {
+        val existing = sourceDao.byId(id) ?: return
+        val config = (runCatching { sourceConfigFromJson(existing.configJson) }.getOrNull()
+            as? GPhotosPickerConfig) ?: return
+        sourceDao.upsert(
+            existing.copy(
+                configJson = config.copy(
+                    pickedCount = pickedCount,
+                    lastPickedAt = lastPickedAtMillis,
+                ).toJson(),
+            ),
+        )
+    }
+
     suspend fun setEnabled(id: String, enabled: Boolean) = sourceDao.setEnabled(id, enabled)
 
     suspend fun delete(id: String) {
@@ -79,6 +124,9 @@ class SourceRepository(
     }
 
     fun immichApiKey(sourceId: String): String? = secrets.getImmichApiKey(sourceId)
+
+    fun gphotosRefreshToken(sourceId: String): String? = secrets.getGphotosRefreshToken(sourceId)
+    fun gphotosClientSecret(sourceId: String): String? = secrets.getGphotosClientSecret(sourceId)
 
     suspend fun recordSync(
         id: String,

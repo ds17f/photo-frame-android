@@ -7,13 +7,14 @@ import org.junit.Test
 
 class CacheEvictorTest {
 
-    private fun ref(id: String, sizeBytes: Long, lastShownAt: Long?) = EvictionRef(
-        sourceId = "s",
-        remoteId = id,
-        localPath = "/cache/$id.jpg",
-        sizeBytes = sizeBytes,
-        lastShownAt = lastShownAt,
-    )
+    private fun ref(id: String, sizeBytes: Long, lastShownAt: Long?, sourceId: String = "s") =
+        EvictionRef(
+            sourceId = sourceId,
+            remoteId = id,
+            localPath = "/cache/$id.jpg",
+            sizeBytes = sizeBytes,
+            lastShownAt = lastShownAt,
+        )
 
     @Test fun underCap_evictsNothing() {
         val photos = listOf(ref("a", 100, 1), ref("b", 100, 2))
@@ -68,6 +69,22 @@ class CacheEvictorTest {
             protectedKeys = setOf("s/horizon"),
         )
         assertEquals(listOf("other"), victims.map { it.remoteId })
+    }
+
+    @Test fun pinnedSource_isNeverEvicted() {
+        // Picker photos can't be re-downloaded once evicted (baseURLs expire), so their source is
+        // pinned — even though it's the least-recently-shown, eviction skips it (DESIGN §5.2/§6).
+        val photos = listOf(
+            ref("picked", 100, lastShownAt = 1, sourceId = "gphotos-1"),
+            ref("immich", 100, lastShownAt = 2, sourceId = "s"),
+        )
+        val victims = CacheEvictor.selectVictims(
+            photos,
+            totalBytes = 200,
+            capBytes = 150,
+            pinnedSourceIds = setOf("gphotos-1"),
+        )
+        assertEquals(listOf("immich"), victims.map { it.remoteId })
     }
 
     @Test fun steadyState_evictsLeastValuableDownToCap_keepingHorizon() {

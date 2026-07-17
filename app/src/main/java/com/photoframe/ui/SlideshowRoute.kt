@@ -360,6 +360,10 @@ fun SlideshowRoute(onExit: () -> Unit) {
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Add to favorites") }
                             TextButton(
+                                onClick = { slideshowVm.hidePhoto(photo); menuPhoto = null },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Hide from frame") }
+                            TextButton(
                                 onClick = { confirmDelete = photo; menuPhoto = null },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Delete from Immich") }

@@ -45,12 +45,17 @@ class ImmichSource(
         val selection = config.selection
         if (selection.isEmpty) return
 
+        // Blacklist: assets in the "hidden from frame" album are excluded from the listing. Because
+        // sync mirrors the source (MIRROR policy), a photo added to that album stops being emitted
+        // and is removed from the index on the next pass — whether hidden from the frame or in Immich.
+        val hidden = hiddenAssetIds()
+
         // Dedupe across facets (an asset can match several) without holding the whole library:
         // only the id set is retained; each page's DTOs are emitted then freed.
         val seen = HashSet<String>()
         suspend fun emit(assets: List<ImmichAssetDto>) {
             val page = assets.asSequence()
-                .filter { it.isDisplayable && seen.add(it.id) }
+                .filter { it.isDisplayable && it.id !in hidden && seen.add(it.id) }
                 .map { it.toRemotePhoto() }
                 .toList()
             if (page.isNotEmpty()) onPage(page)
@@ -108,6 +113,38 @@ class ImmichSource(
         }
     }
 
+    override val canHide: Boolean get() = true
+
+    /**
+     * Hide the asset from the frame by adding it to the shared "hidden from frame" album (created
+     * on first use), which [listPhotos] excludes. Kept at the source; visible to any frame pointing
+     * at the same server. Throws with a clear message on failure.
+     */
+    override suspend fun hideRemote(remoteId: String) {
+        val albumId = hiddenAlbumId(create = true) ?: error("Could not create the hidden album")
+        val response = api.addAssetsToAlbum(albumId, ImmichBulkIdsDto(ids = listOf(remoteId)))
+        if (!response.isSuccessful) {
+            val hint = if (response.code() == 403) " — API key needs album.create + albumAsset.create" else ""
+            error("Hide failed (HTTP ${response.code()})$hint")
+        }
+    }
+
+    /** Id of the "hidden from frame" album, or null if it doesn't exist (and [create] is false). */
+    private suspend fun hiddenAlbumId(create: Boolean): String? {
+        api.albums().firstOrNull { it.albumName == HIDDEN_ALBUM_NAME }?.let { return it.id }
+        return if (create) api.createAlbum(ImmichCreateAlbumDto(HIDDEN_ALBUM_NAME)).id else null
+    }
+
+    /** Asset ids in the hidden album (empty if the album doesn't exist yet). */
+    private suspend fun hiddenAssetIds(): Set<String> {
+        val albumId = hiddenAlbumId(create = false) ?: return emptySet()
+        val ids = HashSet<String>()
+        searchEach(ImmichSearchRequestDto(albumIds = listOf(albumId))) { page ->
+            page.forEach { ids.add(it.id) }
+        }
+        return ids
+    }
+
     /**
      * Page through metadata search (newest-first), filtering to displayable images. Under the
      * streaming-cache model the index must hold a row for **every** remote photo (the owner's is
@@ -156,6 +193,10 @@ class ImmichSource(
     companion object {
         private const val PREVIEW_SIZE = "preview"
         private const val PAGE_SIZE = 1000
+
+        /** Album whose members are excluded from the frame (the shared blacklist). A fixed name so
+         *  every frame instance pointing at the same server hides the same photos. */
+        const val HIDDEN_ALBUM_NAME = "Hidden from frame"
 
         /**
          * Safety bound on how many photos one facet lists (newest-first). Well above any realistic

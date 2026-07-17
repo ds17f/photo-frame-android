@@ -50,6 +50,17 @@ interface PhotoSource {
      */
     suspend fun favoriteRemote(remoteId: String): Unit =
         throw UnsupportedOperationException("This source can't favorite photos")
+
+    /** Whether this source supports hiding a remote asset from the frame without deleting it. */
+    val canHide: Boolean get() = false
+
+    /**
+     * Hide [remoteId] from the frame while keeping it at the source (default: unsupported → throws).
+     * Immich adds it to a "hidden from frame" album that [listPhotos] excludes; the change is shared
+     * with any other frame pointing at the same server. Throws with a user-facing message on failure.
+     */
+    suspend fun hideRemote(remoteId: String): Unit =
+        throw UnsupportedOperationException("This source can't hide photos")
 }
 
 /**

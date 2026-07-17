@@ -207,6 +207,36 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Hide a photo from the frame without deleting it — Immich adds it to the shared "hidden from
+     * frame" album (excluded from future syncs). Drops it from the local index and advances off it
+     * so it disappears immediately. Surfaces the result via [events].
+     */
+    fun hidePhoto(photo: UiPhoto) {
+        val ref = photoIndex[photo.id] ?: return
+        viewModelScope.launch {
+            val configured = sourceRepository.byId(ref.sourceId)
+            val source = configured?.let { photoSourceFactory.create(it) }
+            if (source == null || !source.canHide) {
+                _events.send("This source can't hide photos")
+                return@launch
+            }
+            val result = runCatching { source.hideRemote(ref.remoteId) }
+            if (result.isSuccess) {
+                // Grab the cache path before dropping the row, then delete the file off the DB row.
+                val localPath = photoRepository.photoByKey(ref.sourceId, ref.remoteId)?.localPath
+                if (localPath != null) {
+                    withContext(Dispatchers.IO) { runCatching { File(localPath).delete() } }
+                }
+                photoRepository.deleteFromSource(ref.sourceId, listOf(ref.remoteId))
+                if (currentSlideContains(photo.id)) advance(forward = true)
+                _events.send("Hidden from frame")
+            } else {
+                _events.send(result.exceptionOrNull()?.message ?: "Hide failed")
+            }
+        }
+    }
+
     /** Mark a photo as a favorite at its source (Immich). Surfaces the result via [events]. */
     fun favoritePhoto(photo: UiPhoto) {
         val ref = photoIndex[photo.id] ?: return

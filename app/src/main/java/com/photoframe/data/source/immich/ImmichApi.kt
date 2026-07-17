@@ -32,6 +32,19 @@ interface ImmichApi {
     @GET("api/albums")
     suspend fun albums(): List<ImmichAlbumDto>
 
+    /** Create an album (used to lazily provision the "hidden from frame" blacklist album). Needs
+     *  the `album.create` permission. */
+    @POST("api/albums")
+    suspend fun createAlbum(@Body body: ImmichCreateAlbumDto): ImmichAlbumDto
+
+    /** Add assets to an album (blacklist a photo). Needs the `albumAsset.create` permission. Returns
+     *  a per-asset result array; we only check the HTTP status. */
+    @PUT("api/albums/{id}/assets")
+    suspend fun addAssetsToAlbum(
+        @Path("id") albumId: String,
+        @Body body: ImmichBulkIdsDto,
+    ): Response<ResponseBody>
+
     /** Recognized people (names + face thumbnail paths), paginated (500/page cap; use [size]). */
     @GET("api/people")
     suspend fun people(
@@ -79,6 +92,16 @@ data class ImmichDeleteDto(
 data class ImmichUpdateDto(
     val ids: List<String>,
     val isFavorite: Boolean,
+)
+
+@Serializable
+data class ImmichCreateAlbumDto(
+    val albumName: String,
+)
+
+@Serializable
+data class ImmichBulkIdsDto(
+    val ids: List<String>,
 )
 
 // ---- DTOs (only the fields the app uses; ignoreUnknownKeys tolerates the rest) --------------

@@ -32,6 +32,7 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
 | Connection + auth test | `GET /api/albums` | ✅ Used for test-connection. NOT `/api/users/me` — that needs the unrelated `user.read` permission (403 without it); `/api/albums` needs only `album.read`, which the app requires anyway. |
 | Delete (trash) | `DELETE /api/assets` `{ids,force:false}` | needs `asset.delete`. Long-press → delete. |
 | Favorite | `PUT /api/assets` `{ids,isFavorite:true}` | needs `asset.update`. Long-press → add to favorites. |
+| Hide from frame | `POST /api/albums` `{albumName}` (create) + `PUT /api/albums/{id}/assets` `{ids}` (add) | needs `album.create` + `albumAsset.create`. Long-press → hide. Blacklist album convention below. |
 | List albums | `GET /api/albums` | ✅ summaries (`id`, `albumName`, `assetCount`). |
 | Recognized people | `GET /api/people?withHidden&page&size` | ✅ `{people:[{id,name,thumbnailPath}], total, hasNextPage}`. **Pages at 500.** |
 | Metadata search | `POST /api/search/metadata` | ✅ Backs albums + people + favorites + window. |
@@ -62,6 +63,18 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
   `localDateTime`, `checksum` (→ `contentHash`), top-level `width`/`height`,
   `exifInfo.{exifImageWidth,exifImageHeight,city,country,dateTimeOriginal}`. The prefetcher still
   decodes the downloaded preview for the definitive display size (portrait pairing).
+- **Blacklist = a shared "Hidden from frame" album (convention, not config).** "Hide from frame"
+  keeps the photo in Immich but excludes it from the slideshow by adding it to an album named
+  **`Hidden from frame`** (`ImmichSource.HIDDEN_ALBUM_NAME`), created lazily on first hide.
+  `listPhotos` resolves that album by name (`GET /api/albums`), fetches its members
+  (`searchMetadata albumIds=[…]`), and filters them out of every emitted page. Because Immich sync
+  is **MIRROR**, a hidden photo stops being emitted and is removed from the index on the next pass —
+  whether hidden from the frame or dropped into the album directly in the Immich UI. Fixed name (not
+  a per-source setting) so **every frame instance pointing at the same server hides the same set**.
+  Frame-initiated hide also deletes the local row/file immediately so it vanishes without waiting for
+  a sync. Trade-off vs. Immich **Archive** (which `isDisplayable` already excludes): archive hides a
+  photo everywhere in Immich; the album hides it on the frame only. Non-Immich sources have no hide
+  (report "This source can't hide photos"), same gating as delete/favorite.
 - **⚠️ Full-library listing is slow — offset pagination (caught by live device testing,
   streaming-cache model).** `POST /api/search/metadata` is page/offset-based, and over the owner's
   ~71k-asset library a full `size=1000` listing takes **~104 s** (71 sequential pages; later pages

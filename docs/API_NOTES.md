@@ -120,6 +120,39 @@ periodic `MetadataSyncer` pass is a no-op diff; picker rows use a non-MIRROR pol
 out of `CacheEvictor` (an evicted file could never be re-fetched). `GPhotosPickerSource.fetch`
 throws — it must never be reached.
 
+## Photo deep-links (tap-to-QR)
+
+The long-press "Show QR code" action needs a **durable, per-photo URL** the owner can open on a
+phone. It currently works for **Immich only** and is scoped there in code
+(`SlideshowViewModel.photoWebUrl` returns null unless the source resolves to an `ImmichConfig`).
+
+- **Immich — durable.** `"$baseUrl/photos/$assetId"` (the web viewer). `baseUrl` is persisted
+  non-secret in `ImmichConfig`; `assetId` is the row's `remoteId`. No network call needed. Opens in
+  the Immich mobile app if it's registered to handle the server host, else the browser. Because the
+  server is on the LAN, the link only resolves when the phone is on home wifi — expected for a
+  personal LAN frame. **Verify on device:** whether the installed Immich app actually intercepts the
+  URL vs. falling back to web (undocumented, install-dependent).
+
+### Google Photos link — open investigation (deferred)
+
+No durable per-photo URL is available from what we store today, so the QR action is hidden for
+Picker photos (they report "No shareable link for this source").
+
+- The **Picker API** `mediaItem` exposes only a short-lived `mediaFile.baseUrl` (expiring grant,
+  used once at pick time) and **no `productUrl`**. We persist `clientId`/`pickedCount`/`lastPickedAt`
+  only — not any URL. So there is nothing durable to encode.
+- The old **Library API** `productUrl` (a `photos.google.com/lr/...` link that opens the photo in the
+  Google Photos app/web) is **not** returned by the Picker API, and broad Library API access to a
+  user's own library was restricted/deprecated (March 2025). The Picker `mediaItem.id` is **not** a
+  shareable link and can't be turned into one client-side.
+
+**To investigate before building:** (1) whether any Picker response field (or a follow-up call) can
+yield a `productUrl`/`photos.google.com` link for a picked item — current spec says no; (2) whether
+re-sharing/album flows expose a stable web URL; (3) if neither, whether the feature is simply
+Immich-only by nature. Storing `baseUrl` is a dead end (it expires). Likely conclusion: **not
+possible without a durable URL the Picker API doesn't provide** — record the finding here when
+confirmed against a live account.
+
 ## Google Photos shared album (unofficial parser)
 
 _(none yet — Phase 5)_

@@ -241,8 +241,13 @@ class PhotoPrefetcher(
     companion object {
         private const val TAG = "PhotoPrefetcher"
 
-        /** Keep this many upcoming photos READY or in-flight (covers portrait pairs comfortably). */
-        const val HORIZON = 20
+        /**
+         * Keep this many upcoming photos READY or in-flight — a deep primed buffer so the next
+         * photo is essentially always cached before playback reaches it (and playback rides through
+         * network hiccups). Well within the pool cap (~4k photos at 1 GB); these are the evictor's
+         * protected set, so they hold while the rest of the pool turns over least-recently-shown.
+         */
+        const val HORIZON = 64
 
         /** Concurrent downloads (same as the old bulk-sync parallelism). */
         const val PARALLELISM = 3

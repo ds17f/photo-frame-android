@@ -148,4 +148,72 @@ class PlaylistEngineTest {
         assertNotNull(a)
         assertEquals(a!!.id(), e.current()!!.id())
     }
+
+    // ---- peek-and-hold (the fix for "only cached photos ever show") --------------------------
+
+    @Test fun peekPending_isIdempotent_andDoesNotConsume() {
+        val e = engine()
+        e.setPhotos(landscapes(10))
+        val first = e.peekPending()!!.id()
+        // Repeated peeks (waiting for the photo to cache) must return the SAME slide, not consume
+        // the bag — this is what lets advance() wait instead of discarding an uncached photo.
+        assertEquals(first, e.peekPending()!!.id())
+        assertEquals(first, e.peekPending()!!.id())
+        // Committing then peeking yields the NEXT slide.
+        e.commitPending()
+        assertEquals(first, e.current()!!.id())
+        val second = e.peekPending()!!.id()
+        assertTrue("commit should advance to a new slide", second != first)
+    }
+
+    @Test fun peek_surfacesHeldPendingSlideFirst() {
+        val e = engine()
+        e.setPhotos(landscapes(10))
+        e.next() // consume one so we're mid-cycle
+        val held = e.peekPending()!!.id()
+        // The prefetcher's horizon (peek) must include the held pending photo, or it would never
+        // download the very next photo advance() is waiting on.
+        assertEquals(held, e.peek(1).single().id)
+    }
+
+    @Test fun laggingCache_showsEveryPhotoOncePerCycle_noRepeatsNoDrops() {
+        // Simulate advance()'s wait-don't-discard loop against a cache that lags: every photo needs
+        // a second look before it's "ready". With the old next()-and-skip logic each first look
+        // would consume and discard the photo, so only fast-caching photos showed and they repeated.
+        val e = engine()
+        e.setPhotos(landscapes(50))
+        val shown = mutableListOf<String>()
+        val looks = HashMap<String, Int>()
+        repeat(50) {
+            while (true) {
+                val id = e.peekPending()!!.id()
+                val n = (looks[id] ?: 0) + 1
+                looks[id] = n
+                val cached = n >= 2 // prefetch lag: not ready on the first look
+                if (cached) {
+                    e.commitPending()
+                    shown += id
+                    break
+                }
+                // not cached: loop and peek again — must return the SAME id (held, not dropped)
+            }
+        }
+        assertEquals("every photo shown exactly once", 50, shown.toSet().size)
+        assertEquals("no photo shown twice within the cycle", 50, shown.size)
+    }
+
+    @Test fun heldPending_survivesBackThenForwardNavigation() {
+        val e = engine()
+        e.setPhotos(landscapes(10))
+        val a = e.next()!!.id()
+        val b = e.next()!!.id()
+        val c = e.peekPending()!!.id() // held, awaiting cache — not yet shown
+        assertEquals("still held", c, e.peekPending()!!.id())
+        // User swipes back to A while C is pending.
+        assertEquals(a, e.previous()!!.id())
+        // Forward replays the recorded B (not the still-pending C)...
+        assertEquals(b, e.next()!!.id())
+        // ...and only then shows C.
+        assertEquals(c, e.next()!!.id())
+    }
 }

@@ -30,6 +30,14 @@ class PlaylistEngine(
     private val history = ArrayList<Slide>()
     private var historyIndex = -1
 
+    /**
+     * The next slide, built (its photos already removed from [remaining]) but NOT yet recorded as
+     * shown. Held by [peekPending] so the caller can wait for its photos to be cached before
+     * [commitPending] records it — an uncached upcoming photo is thus never discarded from the
+     * cycle. Null when there is forward history to replay, or nothing has been peeked yet.
+     */
+    private var pending: Slide? = null
+
     var orderMode: OrderMode = OrderMode.SHUFFLE
         private set
     var portraitMode: PortraitMode = PortraitMode.AUTO
@@ -81,6 +89,10 @@ class PlaylistEngine(
         // Drop vanished photos from the pending bag.
         if (removedIds.isNotEmpty()) remaining.removeAll { it.id in removedIds }
 
+        // Drop the held pending slide if one of its photos vanished; it'll be rebuilt from the
+        // fresh bag on the next peekPending().
+        if (pending?.photos?.any { it.id in removedIds } == true) pending = null
+
         // Refresh dims/metadata on entries still in the bag: a photo's orientation may have been
         // corrected from decoded bounds after download (its remote-reported dims were wrong), and
         // the bag holds a stale snapshot — without this it could be mis-paired on its first show.
@@ -125,6 +137,8 @@ class PlaylistEngine(
     }
 
     private fun startNewCycle() {
+        // A held pending slide was built from the old bag/order; a fresh cycle invalidates it.
+        pending = null
         remaining.clear()
         remaining.addAll(
             PhotoOrdering.order(all.values.toList(), orderMode, random, clock(), recencyWindow),
@@ -146,6 +160,15 @@ class PlaylistEngine(
                 if (out.size >= n) return out
             }
         }
+        // The held pending slide comes after any forward history and before the fresh bag — its
+        // photos were removed from `remaining`, so without this the prefetcher would miss the very
+        // next photo it must download.
+        pending?.let {
+            for (p in it.photos) {
+                out += p
+                if (out.size >= n) return out
+            }
+        }
         for (p in remaining) {
             out += p
             if (out.size >= n) return out
@@ -156,19 +179,46 @@ class PlaylistEngine(
     /** Current slide, or null if nothing has been shown yet. */
     fun current(): Slide? = history.getOrNull(historyIndex)
 
-    /** Advance to the next slide. Re-shows forward history first, then generates new slides. */
-    fun next(): Slide? {
-        if (historyIndex < history.lastIndex) {
-            historyIndex++
-            return history[historyIndex]
-        }
+    /**
+     * The next slide to display, WITHOUT recording it as shown. Replays forward history first (if
+     * the user swiped back), otherwise builds the next slide from the bag and holds it, so repeated
+     * calls return the same slide until [commitPending]. This lets the caller wait for the slide's
+     * photos to be cached before committing — an uncached slide is never discarded from the cycle.
+     * Returns null only when there are no photos.
+     */
+    fun peekPending(): Slide? {
+        if (historyIndex < history.lastIndex) return history[historyIndex + 1]
+        pending?.let { return it }
         if (all.isEmpty()) return null
         if (remaining.isEmpty()) startNewCycle()
+        pending = SlideBuilder.nextSlide(remaining, portraitMode, pairOrientation)
+        return pending
+    }
 
-        val slide = SlideBuilder.nextSlide(remaining, portraitMode, pairOrientation) ?: return current()
-        history.add(slide)
+    /**
+     * Record the currently-peeked slide as shown: commit the held [pending] into history, or (when
+     * replaying) advance into the existing forward history. Call once the peeked slide is actually
+     * displayed. No-op if nothing is pending and there is no forward history to advance into.
+     */
+    fun commitPending() {
+        // Replay branch first: while there is forward history to advance through (the user swiped
+        // back), a slide held in `pending` belongs *after* that history, so it must not be committed
+        // yet — just step forward through the recorded slides.
+        if (historyIndex < history.lastIndex) {
+            historyIndex++
+            return
+        }
+        val p = pending ?: return
+        history.add(p)
         historyIndex = history.lastIndex
         trimHistory()
+        pending = null
+    }
+
+    /** Advance to the next slide and record it as shown (peek + commit in one step). */
+    fun next(): Slide? {
+        val slide = peekPending() ?: return null
+        commitPending()
         return slide
     }
 
@@ -178,11 +228,12 @@ class PlaylistEngine(
         return current()
     }
 
-    /** Discard all playback state (bag + history); keeps the photo set and settings. */
+    /** Discard all playback state (bag + history + pending); keeps the photo set and settings. */
     fun reset() {
         remaining.clear()
         history.clear()
         historyIndex = -1
+        pending = null
     }
 
     private fun trimHistory() {

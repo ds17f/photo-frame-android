@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Duration
 
@@ -82,6 +83,12 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private var advanceJob: Job? = null
     private var slideJob: Job? = null
     private var controlsHideJob: Job? = null
+
+    /** Identity of the slide currently held pending (peeked, awaiting its cache), and when it first
+     *  became the target — used to skip past a photo that can never be fetched so it can't freeze
+     *  the frame, without discarding merely-slow photos (which are retried next tick). */
+    private var pendingKey: String? = null
+    private var pendingSince = 0L
 
     init {
         // Seed fixtures only in debug builds — a release "fresh install" must start empty so the
@@ -238,26 +245,75 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Advance to the next displayable slide. Slides whose photos aren't `READY` (not yet prefetched)
-     * or whose file is missing (SD card pulled) are skipped, bounded by [MAX_SKIP] so an empty pool
-     * can't spin forever; missing-file rows are repaired to `INDEXED` for the prefetcher to re-fetch.
-     * With the prefetcher holding the horizon, skips are rare in steady state.
+     * Advance the slideshow one step. Forward advances **commit to the next shuffled photo and wait
+     * for it to be cached** rather than skipping to whatever happens to be cached — so the whole
+     * library rotates (no repeats within a cycle) instead of only the subset that cached fastest.
+     * See [advanceForward]. Backward simply replays cached history.
      */
     private fun advance(forward: Boolean) {
         slideJob?.cancel()
         slideJob = viewModelScope.launch {
-            var attempts = 0
-            while (attempts < MAX_SKIP) {
-                attempts++
-                val slide = (if (forward) engine.next() else engine.previous()) ?: break
-                val ui = toDisplayableSlide(slide) ?: continue
-                _uiState.value = _uiState.value.copy(slide = ui)
-                markShown(ui)
-                break
-            }
+            if (forward) advanceForward() else advanceBackward()
             updateHorizon()
         }
     }
+
+    /**
+     * Peek the next shuffled slide (held, not yet consumed), point the prefetcher at it, and wait a
+     * bounded time for its photos to be cached before showing it. If it isn't cached in time we keep
+     * it pending and retry on the next tick — the photo stays in rotation rather than being dropped,
+     * and the current photo simply dwells a little longer. Only if a slide stays unfetchable for
+     * [STUCK_SKIP_MS] (a broken/deleted photo) do we skip past it, so one bad photo can't freeze the
+     * frame; it returns on the next cycle.
+     */
+    private suspend fun advanceForward() {
+        val slide = engine.peekPending() ?: return
+        trackPending(slide)
+        updateHorizon() // prioritise downloading this slide + the buffer ahead of it right now
+
+        // Escape checked *before* the cancellable wait below, so it still fires when a short slide
+        // interval cancels the wait each tick: skip a slide that has been unfetchable too long.
+        if (System.currentTimeMillis() - pendingSince >= STUCK_SKIP_MS &&
+            toDisplayableSlide(slide) == null
+        ) {
+            engine.commitPending()
+            pendingKey = null
+            return
+        }
+
+        val ui = awaitDisplayable(slide) ?: return // not cached yet → keep pending, retry next tick
+        engine.commitPending()
+        pendingKey = null
+        _uiState.value = _uiState.value.copy(slide = ui)
+        markShown(ui)
+    }
+
+    private suspend fun advanceBackward() {
+        val slide = engine.previous() ?: return
+        val ui = toDisplayableSlide(slide) ?: return // an evicted back-history slide: stay put
+        _uiState.value = _uiState.value.copy(slide = ui)
+        markShown(ui)
+    }
+
+    /** Reset the stuck-skip timer whenever the pending target changes. */
+    private fun trackPending(slide: Slide) {
+        val key = slide.photos.joinToString(",") { it.id }
+        if (key != pendingKey) {
+            pendingKey = key
+            pendingSince = System.currentTimeMillis()
+        }
+    }
+
+    /** Suspend until [slide]'s photos are cached and displayable, or [PREFETCH_WAIT_MS] elapses. */
+    private suspend fun awaitDisplayable(slide: Slide): UiSlide? =
+        withTimeoutOrNull(PREFETCH_WAIT_MS) {
+            var ui = toDisplayableSlide(slide)
+            while (ui == null) {
+                delay(PREFETCH_POLL_MS)
+                ui = toDisplayableSlide(slide)
+            }
+            ui
+        }
 
     /** Push the prefetcher's download horizon = the next [PhotoPrefetcher.HORIZON] upcoming photos. */
     private fun updateHorizon() {
@@ -344,8 +400,17 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val CONTROLS_TIMEOUT_MS = 5_000L
 
-        /** Bound on how many un-cached slides advance() may skip before giving up this tick. */
-        private const val MAX_SKIP = 50
+        /** How long a forward advance waits for the next slide's photos to be cached before giving
+         *  up for this tick (kept pending and retried). Generous vs a LAN Immich fetch (<1s). */
+        private const val PREFETCH_WAIT_MS = 8_000L
+
+        /** Re-check interval while waiting for the pending slide to cache. */
+        private const val PREFETCH_POLL_MS = 400L
+
+        /** How long a slide may stay unfetchable before advance() skips past it, so a broken or
+         *  deleted photo can't freeze the frame. Well above [PREFETCH_WAIT_MS]; the photo returns
+         *  on the next cycle. */
+        private const val STUCK_SKIP_MS = 45_000L
 
         /** Debounce window collapsing a burst of index changes (e.g. streamed sync pages that each
          *  insert rows) into a single re-feed, so first-run population doesn't thrash the engine. */

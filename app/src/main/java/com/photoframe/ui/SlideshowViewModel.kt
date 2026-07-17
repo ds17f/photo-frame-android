@@ -1,6 +1,7 @@
 package com.photoframe.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.photoframe.PhotoFrameApp
@@ -143,6 +144,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
                 val refs = withContext(Dispatchers.IO) { photoRepository.loadFullIndex() }
                 photoIndex = refs.associateBy { it.key }
                 engine.setPhotos(refs.map { it.toPlaylistPhoto() })
+                Log.i(TAG, "feed: index=${refs.size} favorites=${refs.count { it.isFavorite }}")
                 val hadSlide = _uiState.value.slide != null
                 _uiState.value = _uiState.value.copy(photoCount = refs.size, loading = false)
                 if (!hadSlide && refs.isNotEmpty()) advance(forward = true) else updateHorizon()
@@ -324,17 +326,31 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         if (System.currentTimeMillis() - pendingSince >= STUCK_SKIP_MS &&
             toDisplayableSlide(slide) == null
         ) {
+            Log.w(TAG, "skip '${slide.logId()}': never cached in ${STUCK_SKIP_MS}ms (prefetch stuck)")
             engine.commitPending()
             pendingKey = null
             return
         }
 
-        val ui = awaitDisplayable(slide) ?: return // not cached yet → keep pending, retry next tick
+        val ui = awaitDisplayable(slide)
+        if (ui == null) {
+            // Not cached in time — hold it and retry next tick. Frequent here = prefetch can't keep
+            // up, which is what makes only the already-cached photos cycle.
+            Log.i(TAG, "hold '${slide.logId()}': not cached yet, prefetch behind (bag=${engine.size})")
+            return
+        }
         engine.commitPending()
         pendingKey = null
         _uiState.value = _uiState.value.copy(slide = ui)
         markShown(ui)
+        Log.i(TAG, "show '${slide.logId()}' fav=${slide.anyFavorite()} bag=${engine.size} share=${engine.favoriteShare}")
     }
+
+    /** Short photo ids for logs (drops the sourceId prefix). */
+    private fun Slide.logId(): String = photos.joinToString("+") { it.id.substringAfterLast('/').take(8) }
+
+    /** Whether any photo in the slide is a favorite (per the current index), for playback logs. */
+    private fun Slide.anyFavorite(): Boolean = photos.any { photoIndex[it.id]?.isFavorite == true }
 
     private suspend fun advanceBackward() {
         val slide = engine.previous() ?: return
@@ -446,6 +462,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "Slideshow"
         private const val CONTROLS_TIMEOUT_MS = 5_000L
 
         /** How long a forward advance waits for the next slide's photos to be cached before giving

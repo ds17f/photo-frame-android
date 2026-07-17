@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.photoframe.ui.controls.SlideshowControls
 import com.photoframe.ui.diagnostics.DiagnosticsScreen
@@ -329,23 +331,34 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onPhotoLongPress = { menuPhoto = it },
             )
 
-            // Long-press action menu: favorite (immediate) or delete (→ confirm).
+            // Long-press action menu: the photo, a scan-to-open QR (Immich only), and the actions
+            // (favorite immediately / delete → confirm) — all in one dialog, no extra tap.
             menuPhoto?.let { photo ->
+                // Resolve the per-photo web URL for the QR; null (non-Immich) simply omits the QR.
+                val qrUrl by produceState<String?>(null, photo.id) {
+                    value = slideshowVm.photoWebUrl(photo)
+                }
                 AlertDialog(
                     onDismissRequest = { menuPhoto = null },
                     title = { Text("Photo actions") },
                     text = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             PhotoThumb(photo.path) // the exact photo being acted on
+                            qrUrl?.let { url ->
+                                Spacer(Modifier.height(12.dp))
+                                val qr = remember(url) { QrCode.generate(url, 640) }
+                                Image(
+                                    bitmap = qr,
+                                    contentDescription = "QR code linking to this photo",
+                                    modifier = Modifier.size(180.dp),
+                                )
+                                Text("Scan to open on your phone", fontSize = 12.sp)
+                            }
                             Spacer(Modifier.height(12.dp))
                             TextButton(
                                 onClick = { slideshowVm.favoritePhoto(photo); menuPhoto = null },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Add to favorites") }
-                            TextButton(
-                                onClick = { slideshowVm.showQrForPhoto(photo); menuPhoto = null },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Show QR code") }
                             TextButton(
                                 onClick = { confirmDelete = photo; menuPhoto = null },
                                 modifier = Modifier.fillMaxWidth(),
@@ -355,29 +368,6 @@ fun SlideshowRoute(onExit: () -> Unit) {
                     confirmButton = {},
                     dismissButton = {
                         TextButton(onClick = { menuPhoto = null }) { Text("Cancel") }
-                    },
-                )
-            }
-
-            // QR code linking to the tapped photo on the Immich web viewer (scan to open on phone).
-            state.qrUrl?.let { url ->
-                AlertDialog(
-                    onDismissRequest = { slideshowVm.dismissQr() },
-                    title = { Text("Scan to open on your phone") },
-                    text = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            val qr = remember(url) { QrCode.generate(url, 640) }
-                            Image(
-                                bitmap = qr,
-                                contentDescription = "QR code linking to this photo",
-                                modifier = Modifier.size(240.dp),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(url, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { slideshowVm.dismissQr() }) { Text("Close") }
                     },
                 )
             }

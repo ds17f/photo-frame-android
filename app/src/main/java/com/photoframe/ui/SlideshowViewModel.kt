@@ -45,8 +45,6 @@ data class SlideshowUiState(
     val isPaused: Boolean = false,
     val controlsVisible: Boolean = false,
     val loading: Boolean = true,
-    /** When non-null, the UI shows a QR code for this URL (a link to view the tapped photo). */
-    val qrUrl: String? = null,
 )
 
 /**
@@ -234,29 +232,12 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Show a QR code linking to the tapped photo on the source's web viewer (scan it to open the
-     * photo on your phone). Only Immich sources have a durable per-photo URL; others report that
-     * there's no link. The URL is the Immich web viewer, which opens in the Immich app if installed.
+     * The source's web-viewer URL for a photo (for the long-press QR code), or null if the source
+     * has no durable per-photo URL. Only Immich does today — its web viewer opens in the Immich app
+     * if installed; Picker baseURLs expire, so those photos have no link (the QR is simply omitted).
      */
-    fun showQrForPhoto(photo: UiPhoto) {
-        val ref = photoIndex[photo.id] ?: return
-        viewModelScope.launch {
-            val url = photoWebUrl(ref)
-            if (url == null) {
-                _events.send("No shareable link for this source")
-                return@launch
-            }
-            _uiState.value = _uiState.value.copy(qrUrl = url)
-        }
-    }
-
-    fun dismissQr() {
-        _uiState.value = _uiState.value.copy(qrUrl = null)
-    }
-
-    /** The source's web-viewer URL for a photo, or null if the source has no durable per-photo URL
-     *  (only Immich does today — Picker baseURLs expire, so they can't be linked). */
-    private suspend fun photoWebUrl(ref: PhotoRef): String? {
+    suspend fun photoWebUrl(photo: UiPhoto): String? {
+        val ref = photoIndex[photo.id] ?: return null
         val base = sourceRepository.byId(ref.sourceId)?.immichConfig?.baseUrl ?: return null
         return "${base.trimEnd('/')}/photos/${ref.remoteId}"
     }

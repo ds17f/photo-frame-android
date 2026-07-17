@@ -49,6 +49,7 @@ data class PlaylistPhoto(
     val orientation: Orientation,
     val takenAt: Instant?,
     val addedAt: Instant,
+    val isFavorite: Boolean = false,
 ) {
     val isPortrait: Boolean get() = orientation.isPortrait
 }

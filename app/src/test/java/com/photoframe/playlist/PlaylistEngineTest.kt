@@ -202,6 +202,71 @@ class PlaylistEngineTest {
         assertEquals("no photo shown twice within the cycle", 50, shown.size)
     }
 
+    // ---- favorites bias ----------------------------------------------------------------------
+
+    private fun mixedWithFavorites(): List<com.photoframe.playlist.model.PlaylistPhoto> =
+        landscapes(20) + (1..5).map { TestPhotos.favorite("F$it") }
+
+    @Test fun favoriteShare_full_showsOnlyFavorites() {
+        val e = engine()
+        e.setPhotos(mixedWithFavorites())
+        e.updateConfig(favoriteShare = 1.0)
+        val shown = (1..40).map { e.next()!!.id() }
+        assertTrue("every slide should be a favorite, saw $shown", shown.all { it.startsWith("F") })
+    }
+
+    @Test fun favoriteShare_biasesTowardFavorites_aboveNaturalRate() {
+        val e = engine()
+        e.setPhotos(mixedWithFavorites()) // favorites are 5/25 = 20% of the library
+        e.updateConfig(favoriteShare = 0.5)
+        val shown = (1..500).map { e.next()!!.id() }
+        val favFraction = shown.count { it.startsWith("F") } / 500.0
+        // With a 50% draw-from-favorites probability the favorites share must sit well above their
+        // 20% natural rate (and below 100%).
+        assertTrue("favorites should be boosted, got $favFraction", favFraction in 0.45..0.75)
+    }
+
+    @Test fun favoriteShare_zero_leavesFavoritesAtNaturalRate() {
+        val e = engine()
+        e.setPhotos(mixedWithFavorites())
+        e.updateConfig(favoriteShare = 0.0)
+        // No injection: one full cycle shows each of the 25 photos exactly once (natural 20%).
+        val cycle = (1..25).map { e.next()!!.id() }
+        assertEquals(25, cycle.toSet().size)
+        assertEquals(5, cycle.count { it.startsWith("F") })
+    }
+
+    @Test fun favoriteShare_ignoredInChronologicalMode() {
+        val e = engine()
+        e.setPhotos(
+            (1..5).map { landscape("L$it").copy(takenAt = Instant.parse("202$it-01-01T00:00:00Z")) } +
+                TestPhotos.favorite("F1").copy(takenAt = Instant.parse("2026-01-01T00:00:00Z")),
+        )
+        e.updateConfig(orderMode = OrderMode.CHRONOLOGICAL, favoriteShare = 1.0)
+        // Chronological order is honoured despite a 100% favorite share — no injection in ordered modes.
+        val ids = (1..6).map { e.next()!!.id() }
+        assertEquals(listOf("L1", "L2", "L3", "L4", "L5", "F1"), ids)
+    }
+
+    @Test fun favoriteShare_full_withNoFavorites_fallsBackToMainCycle() {
+        val e = engine()
+        e.setPhotos(landscapes(10)) // no favorites
+        e.updateConfig(favoriteShare = 1.0)
+        val shown = (1..10).mapNotNull { e.next()?.id() }
+        assertEquals("still plays the main cycle when there are no favorites", 10, shown.toSet().size)
+    }
+
+    @Test fun favorite_canRecurWithinASingleMainCycle() {
+        val e = engine()
+        e.setPhotos(mixedWithFavorites())
+        e.updateConfig(favoriteShare = 0.5)
+        // A favorite recurring inside 25 draws (one main cycle length) proves increased frequency —
+        // impossible under pure without-replacement.
+        val shown = (1..25).map { e.next()!!.id() }
+        val favs = shown.filter { it.startsWith("F") }
+        assertTrue("a favorite should repeat within one cycle, saw $favs", favs.size != favs.toSet().size)
+    }
+
     @Test fun heldPending_survivesBackThenForwardNavigation() {
         val e = engine()
         e.setPhotos(landscapes(10))

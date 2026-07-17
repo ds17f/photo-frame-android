@@ -49,6 +49,10 @@ class PhotoRepository(private val photoDao: PhotoDao) {
     suspend fun markShown(sourceId: String, remoteId: String, shownAtMillis: Long) =
         photoDao.markShown(sourceId, remoteId, shownAtMillis)
 
+    /** Set a row's favorite flag locally (optimistic update after favoriting at the source). */
+    suspend fun markFavorite(sourceId: String, remoteId: String, isFavorite: Boolean) =
+        photoDao.markFavorite(sourceId, remoteId, isFavorite)
+
     suspend fun deleteFromSource(sourceId: String, remoteIds: List<String>) =
         photoDao.deleteFromSource(sourceId, remoteIds)
 

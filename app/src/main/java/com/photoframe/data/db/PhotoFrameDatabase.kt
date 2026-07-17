@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PhotoEntity::class, SourceEntity::class, SyncLogEntity::class],
-    version = 3,
+    version = 4,
     // Schema export is deferred until the network sources stabilize the schema and real
     // migrations begin; a personal sideloaded app can fall back to destructive migration in
     // the meantime (the cache re-syncs from the source on first run after an upgrade).
@@ -53,6 +53,17 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 → v4: add `photos.isFavorite` (favorites bias). Additive column, so an in-place
+         * ALTER preserves the cache and show history; existing rows default to not-favorite and
+         * pick up their real status on the next metadata sync.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `photos` ADD COLUMN `isFavorite` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): PhotoFrameDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -60,7 +71,7 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
                     PhotoFrameDatabase::class.java,
                     "photoframe.db",
                 )
-                    .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration() // backstop for any other version gap
                     .build()
                     .also { instance = it }

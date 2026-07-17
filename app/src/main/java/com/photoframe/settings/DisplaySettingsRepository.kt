@@ -33,6 +33,7 @@ class DisplaySettingsRepository(private val context: Context) {
             prefs[Keys.PORTRAIT_MODE] = next.portraitMode.name
             prefs[Keys.ORDER_MODE] = next.orderMode.name
             prefs[Keys.RECENCY_DAYS] = next.recencyWindowDays.coerceIn(DisplaySettings.RECENCY_WINDOW_DAYS_RANGE)
+            prefs[Keys.FAVORITE_SHARE] = next.favoriteSharePercent.coerceIn(DisplaySettings.FAVORITE_SHARE_PERCENT_RANGE)
             prefs[Keys.CLOCK_ENABLED] = next.clockEnabled
             prefs[Keys.CLOCK_CORNER] = next.clockCorner.name
             prefs[Keys.CLOCK_SIZE] = next.clockSize.name
@@ -50,6 +51,7 @@ class DisplaySettingsRepository(private val context: Context) {
             portraitMode = enumOr(this[Keys.PORTRAIT_MODE], d.portraitMode),
             orderMode = enumOr(this[Keys.ORDER_MODE], d.orderMode),
             recencyWindowDays = this[Keys.RECENCY_DAYS] ?: d.recencyWindowDays,
+            favoriteSharePercent = this[Keys.FAVORITE_SHARE] ?: d.favoriteSharePercent,
             clockEnabled = this[Keys.CLOCK_ENABLED] ?: d.clockEnabled,
             clockCorner = enumOr(this[Keys.CLOCK_CORNER], d.clockCorner),
             clockSize = enumOr(this[Keys.CLOCK_SIZE], d.clockSize),
@@ -68,6 +70,7 @@ class DisplaySettingsRepository(private val context: Context) {
         val PORTRAIT_MODE = stringPreferencesKey("portrait_mode")
         val ORDER_MODE = stringPreferencesKey("order_mode")
         val RECENCY_DAYS = intPreferencesKey("recency_days")
+        val FAVORITE_SHARE = intPreferencesKey("favorite_share_percent")
         val CLOCK_ENABLED = booleanPreferencesKey("clock_enabled")
         val CLOCK_CORNER = stringPreferencesKey("clock_corner")
         val CLOCK_SIZE = stringPreferencesKey("clock_size")

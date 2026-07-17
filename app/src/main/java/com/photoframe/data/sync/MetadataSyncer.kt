@@ -69,6 +69,12 @@ class MetadataSyncer(
                 for (photo in page) {
                     if (!seen.add(photo.remoteId)) continue
                     val have = existing[photo.remoteId]
+                    // Favoriting doesn't change the content hash, so REINDEX won't catch it —
+                    // reconcile it directly on any existing row whose flag drifted (INSERT rows
+                    // get it from toIndexRow).
+                    if (have != null && have.isFavorite != photo.isFavorite) {
+                        photoDao.markFavorite(sourceId, photo.remoteId, photo.isFavorite)
+                    }
                     when (SyncDiff.classify(photo.contentHash, have?.contentHash, have != null)) {
                         SyncDiff.Action.INSERT -> toInsert += photo.toIndexRow(sourceId)
                         SyncDiff.Action.REINDEX -> {
@@ -160,6 +166,7 @@ class MetadataSyncer(
         sizeBytes = 0,
         status = PhotoStatus.INDEXED.name,
         contentHash = contentHash,
+        isFavorite = isFavorite,
     )
 
     companion object {

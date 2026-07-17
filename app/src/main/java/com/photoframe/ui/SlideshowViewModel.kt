@@ -45,6 +45,8 @@ data class SlideshowUiState(
     val isPaused: Boolean = false,
     val controlsVisible: Boolean = false,
     val loading: Boolean = true,
+    /** When non-null, the UI shows a QR code for this URL (a link to view the tapped photo). */
+    val qrUrl: String? = null,
 )
 
 /**
@@ -108,6 +110,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
                 orderMode = settings.orderMode,
                 portraitMode = settings.portraitMode,
                 recencyWindow = Duration.ofDays(settings.recencyWindowDays.toLong()),
+                favoriteShare = settings.favoriteSharePercent / 100.0,
             )
             val prevInterval = _uiState.value.settings.intervalSeconds
             _uiState.value = _uiState.value.copy(settings = settings)
@@ -217,11 +220,45 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             val result = runCatching { source.favoriteRemote(ref.remoteId) }
+            if (result.isSuccess) {
+                // Reflect it locally right away, then re-feed so the favorites bias picks it up
+                // without waiting for the next metadata sync.
+                photoRepository.markFavorite(ref.sourceId, ref.remoteId, true)
+                reloadSignal.trySend(Unit)
+            }
             _events.send(
                 if (result.isSuccess) "Added to favorites"
                 else result.exceptionOrNull()?.message ?: "Favorite failed",
             )
         }
+    }
+
+    /**
+     * Show a QR code linking to the tapped photo on the source's web viewer (scan it to open the
+     * photo on your phone). Only Immich sources have a durable per-photo URL; others report that
+     * there's no link. The URL is the Immich web viewer, which opens in the Immich app if installed.
+     */
+    fun showQrForPhoto(photo: UiPhoto) {
+        val ref = photoIndex[photo.id] ?: return
+        viewModelScope.launch {
+            val url = photoWebUrl(ref)
+            if (url == null) {
+                _events.send("No shareable link for this source")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(qrUrl = url)
+        }
+    }
+
+    fun dismissQr() {
+        _uiState.value = _uiState.value.copy(qrUrl = null)
+    }
+
+    /** The source's web-viewer URL for a photo, or null if the source has no durable per-photo URL
+     *  (only Immich does today — Picker baseURLs expire, so they can't be linked). */
+    private suspend fun photoWebUrl(ref: PhotoRef): String? {
+        val base = sourceRepository.byId(ref.sourceId)?.immichConfig?.baseUrl ?: return null
+        return "${base.trimEnd('/')}/photos/${ref.remoteId}"
     }
 
     private fun currentSlideContains(id: String): Boolean = when (val s = _uiState.value.slide) {

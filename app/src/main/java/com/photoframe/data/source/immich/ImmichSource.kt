@@ -143,6 +143,7 @@ class ImmichSource(
         height = height ?: exifInfo?.exifImageHeight,
         locationLabel = locationLabelOf(exifInfo),
         contentHash = checksum,
+        isFavorite = isFavorite,
     )
 
     private fun locationLabelOf(exif: ImmichExifDto?): String? {

@@ -13,6 +13,7 @@ fun PhotoEntity.toPlaylistPhoto(): PlaylistPhoto =
         orientation = Orientation.of(width, height),
         takenAt = takenAt?.let(Instant::ofEpochMilli),
         addedAt = Instant.ofEpochMilli(addedAt),
+        isFavorite = isFavorite,
     )
 
 /** Same projection from the lightweight [PhotoRef] the playlist observes. */
@@ -22,4 +23,5 @@ fun PhotoRef.toPlaylistPhoto(): PlaylistPhoto =
         orientation = Orientation.of(width, height),
         takenAt = takenAt?.let(Instant::ofEpochMilli),
         addedAt = Instant.ofEpochMilli(addedAt),
+        isFavorite = isFavorite,
     )

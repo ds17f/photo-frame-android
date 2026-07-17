@@ -64,6 +64,8 @@ data class RemotePhoto(
     val height: Int? = null,
     val locationLabel: String? = null,
     val contentHash: String? = null,
+    /** Whether the source marks this photo a favorite (sources that don't expose it report false). */
+    val isFavorite: Boolean = false,
 )
 
 /**

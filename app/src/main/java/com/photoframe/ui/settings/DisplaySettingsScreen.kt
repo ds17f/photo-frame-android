@@ -95,6 +95,23 @@ fun DisplaySettingsScreen(
                     onPosition = { d -> onUpdate { it.copy(recencyWindowDays = d) } },
                 )
             }
+            // Favorites bias applies only in shuffle modes (ordered modes keep their strict order).
+            if (settings.orderMode == OrderMode.SHUFFLE ||
+                settings.orderMode == OrderMode.RECENCY_BOOSTED_SHUFFLE
+            ) {
+                SliderRow(
+                    label = "Show favorites more often",
+                    valueLabel = when (settings.favoriteSharePercent) {
+                        0 -> "Off"
+                        100 -> "Favorites only"
+                        else -> "~${settings.favoriteSharePercent}% of photos"
+                    },
+                    steps = 0,
+                    position = settings.favoriteSharePercent,
+                    range = DisplaySettings.FAVORITE_SHARE_PERCENT_RANGE.first..DisplaySettings.FAVORITE_SHARE_PERCENT_RANGE.last,
+                    onPosition = { p -> onUpdate { it.copy(favoriteSharePercent = p) } },
+                )
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             SectionHeader("Motion")

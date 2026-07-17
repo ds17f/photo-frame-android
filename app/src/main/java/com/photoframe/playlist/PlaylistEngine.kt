@@ -38,7 +38,16 @@ class PlaylistEngine(
      */
     private var pending: Slide? = null
 
+    /** Separate without-replacement bag of favorites, drawn from independently of [remaining] so a
+     *  favorite can recur more often than once per full cycle (favorites bias). Refilled when empty. */
+    private val favoritesBag = ArrayDeque<PlaylistPhoto>()
+
     var orderMode: OrderMode = OrderMode.SHUFFLE
+        private set
+
+    /** Probability (0..1) that a given slide is drawn from the favorites bag instead of the main
+     *  cycle. 0 disables the bias; 1 shows favorites only. Applies only in shuffle order modes. */
+    var favoriteShare: Double = 0.0
         private set
     var portraitMode: PortraitMode = PortraitMode.AUTO
         private set
@@ -60,6 +69,7 @@ class PlaylistEngine(
         portraitMode: PortraitMode = this.portraitMode,
         recencyWindow: Duration = this.recencyWindow,
         pairOrientation: Orientation = this.pairOrientation,
+        favoriteShare: Double = this.favoriteShare,
     ) {
         val orderChanged = orderMode != this.orderMode || recencyWindow != this.recencyWindow
         this.orderMode = orderMode
@@ -68,6 +78,8 @@ class PlaylistEngine(
         // Pairing only affects how upcoming photos are grouped, not the draw order, so a
         // screen-rotation change here must not disturb the current bag.
         this.pairOrientation = pairOrientation
+        // Favorites bias tunes only which bag the next slide is drawn from — no cycle restart.
+        this.favoriteShare = favoriteShare.coerceIn(0.0, 1.0)
         if (orderChanged) startNewCycle()
     }
 
@@ -92,6 +104,10 @@ class PlaylistEngine(
         // Drop the held pending slide if one of its photos vanished; it'll be rebuilt from the
         // fresh bag on the next peekPending().
         if (pending?.photos?.any { it.id in removedIds } == true) pending = null
+
+        // Drop favorites-bag entries that vanished or are no longer favorites; newly-favorited
+        // photos are picked up when the bag next refills.
+        if (favoritesBag.isNotEmpty()) favoritesBag.removeAll { incoming[it.id]?.isFavorite != true }
 
         // Refresh dims/metadata on entries still in the bag: a photo's orientation may have been
         // corrected from decoded bounds after download (its remote-reported dims were wrong), and
@@ -169,6 +185,14 @@ class PlaylistEngine(
                 if (out.size >= n) return out
             }
         }
+        // Surface upcoming favorites too when the bias is on, so injected favorites are prefetched
+        // rather than caught uncached when they're drawn.
+        if (favoriteShare > 0.0) {
+            for (p in favoritesBag) {
+                out += p
+                if (out.size >= n) return out
+            }
+        }
         for (p in remaining) {
             out += p
             if (out.size >= n) return out
@@ -190,9 +214,34 @@ class PlaylistEngine(
         if (historyIndex < history.lastIndex) return history[historyIndex + 1]
         pending?.let { return it }
         if (all.isEmpty()) return null
-        if (remaining.isEmpty()) startNewCycle()
-        pending = SlideBuilder.nextSlide(remaining, portraitMode, pairOrientation)
+        pending = if (shouldDrawFavorite()) buildFavoriteSlide() ?: buildMainSlide() else buildMainSlide()
         return pending
+    }
+
+    /** Draw the next slide from the favorites bag with probability [favoriteShare] (shuffle modes
+     *  only, and only when favorites exist). Idempotent per pending slide: the coin is flipped once,
+     *  when the slide is built, so repeated peeks while waiting don't re-roll. */
+    private fun shouldDrawFavorite(): Boolean {
+        val shuffle = orderMode == OrderMode.SHUFFLE || orderMode == OrderMode.RECENCY_BOOSTED_SHUFFLE
+        if (!shuffle || favoriteShare <= 0.0) return false
+        if (favoritesBag.isEmpty()) refillFavoritesBag()
+        return favoritesBag.isNotEmpty() && random.nextDouble() < favoriteShare
+    }
+
+    private fun buildFavoriteSlide(): Slide? {
+        if (favoritesBag.isEmpty()) refillFavoritesBag()
+        if (favoritesBag.isEmpty()) return null
+        return SlideBuilder.nextSlide(favoritesBag, portraitMode, pairOrientation)
+    }
+
+    private fun buildMainSlide(): Slide? {
+        if (remaining.isEmpty()) startNewCycle()
+        return SlideBuilder.nextSlide(remaining, portraitMode, pairOrientation)
+    }
+
+    private fun refillFavoritesBag() {
+        favoritesBag.clear()
+        favoritesBag.addAll(all.values.filter { it.isFavorite }.shuffled(random))
     }
 
     /**
@@ -231,6 +280,7 @@ class PlaylistEngine(
     /** Discard all playback state (bag + history + pending); keeps the photo set and settings. */
     fun reset() {
         remaining.clear()
+        favoritesBag.clear()
         history.clear()
         historyIndex = -1
         pending = null

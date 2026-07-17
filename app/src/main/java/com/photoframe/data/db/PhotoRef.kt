@@ -15,6 +15,7 @@ data class PhotoRef(
     val height: Int?,
     val takenAt: Long?,
     val addedAt: Long,
+    val isFavorite: Boolean,
 ) {
     /** Stable per-photo key, matching [PhotoEntity.key]. */
     val key: String get() = "$sourceId/$remoteId"
@@ -30,6 +31,7 @@ data class SourceIndexRow(
     val contentHash: String?,
     val status: String,
     val localPath: String?,
+    val isFavorite: Boolean,
 )
 
 /**

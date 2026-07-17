@@ -13,10 +13,20 @@ object TestPhotos {
         orientation: Orientation = Orientation.LANDSCAPE,
         takenAt: Instant? = null,
         addedAt: Instant = EPOCH,
-    ) = PlaylistPhoto(id = id, orientation = orientation, takenAt = takenAt, addedAt = addedAt)
+        isFavorite: Boolean = false,
+    ) = PlaylistPhoto(
+        id = id,
+        orientation = orientation,
+        takenAt = takenAt,
+        addedAt = addedAt,
+        isFavorite = isFavorite,
+    )
 
     fun landscape(id: String, addedAt: Instant = EPOCH) =
         photo(id, Orientation.LANDSCAPE, addedAt = addedAt)
+
+    /** A favorite landscape (id prefixed so tests can identify favorites by id). */
+    fun favorite(id: String) = photo(id, Orientation.LANDSCAPE, isFavorite = true)
 
     fun portrait(id: String, addedAt: Instant = EPOCH) =
         photo(id, Orientation.PORTRAIT, addedAt = addedAt)

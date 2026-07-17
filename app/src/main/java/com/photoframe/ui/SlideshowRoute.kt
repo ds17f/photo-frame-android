@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -341,6 +343,10 @@ fun SlideshowRoute(onExit: () -> Unit) {
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Add to favorites") }
                             TextButton(
+                                onClick = { slideshowVm.showQrForPhoto(photo); menuPhoto = null },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Show QR code") }
+                            TextButton(
                                 onClick = { confirmDelete = photo; menuPhoto = null },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Delete from Immich") }
@@ -349,6 +355,29 @@ fun SlideshowRoute(onExit: () -> Unit) {
                     confirmButton = {},
                     dismissButton = {
                         TextButton(onClick = { menuPhoto = null }) { Text("Cancel") }
+                    },
+                )
+            }
+
+            // QR code linking to the tapped photo on the Immich web viewer (scan to open on phone).
+            state.qrUrl?.let { url ->
+                AlertDialog(
+                    onDismissRequest = { slideshowVm.dismissQr() },
+                    title = { Text("Scan to open on your phone") },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val qr = remember(url) { QrCode.generate(url, 640) }
+                            Image(
+                                bitmap = qr,
+                                contentDescription = "QR code linking to this photo",
+                                modifier = Modifier.size(240.dp),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(url, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { slideshowVm.dismissQr() }) { Text("Close") }
                     },
                 )
             }

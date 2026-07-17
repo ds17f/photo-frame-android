@@ -37,6 +37,9 @@ data class DisplaySettings(
     val portraitMode: PortraitMode = PortraitMode.AUTO,
     val orderMode: OrderMode = OrderMode.SHUFFLE,
     val recencyWindowDays: Int = 7,
+    /** Roughly what share (%) of shown slides should be favorites (shuffle modes). 0 = no bias,
+     *  100 = favorites only. Achieved by drawing each slide from favorites with this probability. */
+    val favoriteSharePercent: Int = 20,
     val clockEnabled: Boolean = true,
     val clockCorner: Corner = Corner.TOP_START,
     val clockSize: FontSize = FontSize.MEDIUM,
@@ -46,5 +49,6 @@ data class DisplaySettings(
         val INTERVAL_RANGE = 5..3600           // 5 s – 1 h (DESIGN §7)
         val TRANSITION_SECONDS_RANGE = 0.5f..3.0f
         val RECENCY_WINDOW_DAYS_RANGE = 1..90
+        val FAVORITE_SHARE_PERCENT_RANGE = 0..100
     }
 }

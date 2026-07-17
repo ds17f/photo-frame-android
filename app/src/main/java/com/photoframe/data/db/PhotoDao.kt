@@ -35,7 +35,7 @@ interface PhotoDao {
      * page, then the last row's (sourceId, remoteId) for the next. All real keys sort after ("", "").
      */
     @Query(
-        "SELECT sourceId, remoteId, width, height, takenAt, addedAt FROM photos " +
+        "SELECT sourceId, remoteId, width, height, takenAt, addedAt, isFavorite FROM photos " +
             "WHERE (sourceId > :afterSourceId) OR (sourceId = :afterSourceId AND remoteId > :afterRemoteId) " +
             "ORDER BY sourceId, remoteId LIMIT :limit",
     )
@@ -72,11 +72,16 @@ interface PhotoDao {
      * Paged so a 60k single-source library doesn't overflow the CursorWindow.
      */
     @Query(
-        "SELECT remoteId, contentHash, status, localPath FROM photos " +
+        "SELECT remoteId, contentHash, status, localPath, isFavorite FROM photos " +
             "WHERE sourceId = :sourceId AND remoteId > :afterRemoteId " +
             "ORDER BY remoteId LIMIT :limit",
     )
     suspend fun sourceIndexPage(sourceId: String, afterRemoteId: String, limit: Int): List<SourceIndexRow>
+
+    /** Reconcile favorite status on an existing row (favoriting doesn't change the content hash, so
+     *  it isn't caught by REINDEX). Cheap metadata-only update; never touches cache state. */
+    @Query("UPDATE photos SET isFavorite = :isFavorite WHERE sourceId = :sourceId AND remoteId = :remoteId")
+    suspend fun markFavorite(sourceId: String, remoteId: String, isFavorite: Boolean)
 
     /** Insert new index rows; existing rows are left untouched (their cache state is preserved). */
     @Insert(onConflict = OnConflictStrategy.IGNORE)

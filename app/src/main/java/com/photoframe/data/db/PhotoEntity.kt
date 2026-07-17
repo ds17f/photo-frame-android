@@ -38,6 +38,8 @@ data class PhotoEntity(
     val status: String,
     /** Source content hash for change detection when available (DESIGN §5). */
     val contentHash: String? = null,
+    /** Whether the source marks this photo a favorite; biases the slideshow toward it. */
+    val isFavorite: Boolean = false,
 ) {
     /** Stable per-photo key used by the playlist engine and UI. */
     val key: String get() = "$sourceId/$remoteId"

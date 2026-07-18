@@ -64,9 +64,10 @@ uninstall: ## Uninstall the debug app (all profiles)
 	$(ADB) uninstall $(PKG_DEBUG)
 
 .PHONY: logcat
-logcat: ## Tail app logs (PhotoFrame + sync tags)
-	$(ADB) logcat -v time PhotoFrame:V FixtureImporter:V SyncManager:V SyncWorker:V \
-		SourceSyncer:V ImmichSource:V CacheEvictor:V CrashRestartHandler:V AndroidRuntime:E '*:S'
+logcat: ## Tail app logs (playback + sync/cache tags)
+	$(ADB) logcat -v time Slideshow:V PhotoPrefetcher:V MetadataSyncer:V SyncManager:V SyncWorker:V \
+		CacheEvictor:V CacheMaintainer:V PhotoCache:V ImmichImport:V FixtureImporter:V \
+		GPhotosPickerSession:V CrashRestartHandler:V AndroidRuntime:E '*:S'
 
 ## ---- Install / run (release) ---------------------------------------------------------
 
@@ -100,11 +101,11 @@ fixtures: ## Push photos into the debug app's folder: make fixtures DIR=~/photos
 ## ---- Immich (Phase 2) ----------------------------------------------------------------
 
 .PHONY: immich-config
-immich-config: ## Push Immich URL+key from .env to the device (no typing). PKG=... for debug.
+immich-config: ## Push Immich URL+key from .env to the device (no typing). PKG=com.photoframe for release.
 	@test -f .env || { echo "No .env — copy .env.example to .env and fill IMMICH_API_KEY"; exit 1; }
 	@set -a; . ./.env; set +a; \
 	 test -n "$$IMMICH_API_KEY" || { echo "IMMICH_API_KEY is empty in .env"; exit 1; }; \
-	 pkg="$${PKG:-$(PKG_RELEASE)}"; \
+	 pkg="$${PKG:-$(PKG_DEBUG)}"; \
 	 url="$${IMMICH_BASE_URL:-https://immich.example.com}"; \
 	 printf '{"name":"Immich","baseUrl":"%s","apiKey":"%s"}' "$$url" "$$IMMICH_API_KEY" > /tmp/immich_import.json; \
 	 $(ADB) shell mkdir -p /sdcard/Android/data/$$pkg/files; \

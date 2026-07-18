@@ -114,16 +114,30 @@ class MetadataSyncer(
             )
         }
 
-        // Mirror deletions: indexed photos the full listing didn't cover.
-        val toDelete = SyncDiff.toDelete(existing.keys, seen, deletionPolicy)
-        if (toDelete.isNotEmpty()) {
-            toDelete.forEach { remoteId ->
-                existing[remoteId]?.localPath?.let { runCatching { File(it).delete() } }
+        // Mirror deletions, DEBOUNCED. A photo absent from this listing is only a *candidate*:
+        // Immich's offset pagination over non-unique `fileCreatedAt` intermittently drops ~1 asset
+        // per page boundary, so a single miss is unreliable (it re-appears next pass). We delete only
+        // after [DELETE_MISS_STREAK] consecutive misses — a real removal/hide is absent every pass and
+        // crosses the threshold; pagination flicker recovers and resets to 0, so the ~70k stable set
+        // never churns. See docs/API_NOTES.md.
+        val missing = SyncDiff.toDelete(existing.keys, seen, deletionPolicy) // policy-gated candidates
+        var removed = 0
+        if (deletionPolicy == DeletionPolicy.MIRROR) {
+            // Recoveries: rows previously mid-streak that the listing covered again → reset to 0.
+            val recovered = photoDao.remoteIdsWithMissStreak(sourceId).toSet() - missing.toSet()
+            recovered.chunked(SQLITE_BIND_LIMIT).forEach { photoDao.resetMissStreak(sourceId, it) }
+            // Misses: bump the streak; then delete only those that have now crossed the threshold.
+            missing.chunked(SQLITE_BIND_LIMIT).forEach { photoDao.incrementMissStreak(sourceId, it) }
+            val doomed = photoDao.missStreakExceeding(sourceId, DELETE_MISS_STREAK)
+            if (doomed.isNotEmpty()) {
+                doomed.forEach { it.localPath?.let { p -> runCatching { File(p).delete() } } }
+                doomed.map { it.remoteId }.chunked(SQLITE_BIND_LIMIT)
+                    .forEach { photoDao.deleteFromSource(sourceId, it) }
+                removed = doomed.size
             }
-            photoDao.deleteFromSource(sourceId, toDelete)
         }
 
-        outcome(sourceId, indexed, reindexed, toDelete.size, SourceHealth.OK)
+        outcome(sourceId, indexed, reindexed, removed, SourceHealth.OK)
     }
 
     private suspend fun outcome(
@@ -172,5 +186,14 @@ class MetadataSyncer(
     companion object {
         private const val TAG = "MetadataSyncer"
         private const val INDEX_PAGE_SIZE = 5000
+
+        /** Consecutive full syncs a photo must be missing from the listing before it's mirror-deleted.
+         *  At the 30-min default sync interval this is ~1.5 h — long enough that pagination flicker
+         *  (which recovers on the very next pass) never deletes a stable photo, short enough that a
+         *  genuine remote removal still leaves the frame promptly. */
+        private const val DELETE_MISS_STREAK = 3
+
+        /** SQLite caps host parameters per statement (999); chunk `IN (:ids)` writes below it. */
+        private const val SQLITE_BIND_LIMIT = 900
     }
 }

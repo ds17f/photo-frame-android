@@ -52,6 +52,21 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
   `page`, `size=1000`, plus one of `albumIds` / `personIds` / `isFavorite` / `takenAfter` — **all
   accepted by v3**. Pagination via string `assets.nextPage`. (Note: `assets.total` reflects the
   current page count, not the grand total — rely on `nextPage`, which the code does.)
+- **⚠️ Bug caught by live testing — unstable offset pagination churns the index.** `POST /api/search/metadata`
+  paginates by `page`×`size` over the default sort (`fileCreatedAt` desc) with **no unique tiebreaker**.
+  `fileCreatedAt` is not unique (batch imports/bursts share a timestamp), so equal-timestamp rows can
+  reorder between requests; when that crosses a 1000-item page boundary an asset lands on both adjacent
+  pages (harmless — deduped) or **neither** (silently skipped). On the owner's ~71k library this dropped
+  **~1 asset per page boundary ≈ 80–110 assets *every* sync**, with `indexed ≈ removed` and `reindexed=0`
+  and the total pinned at ~71,200 (verified in the on-device `sync_log`: e.g. `+89/−82`, `+98/−85`, …).
+  A skipped asset was mirror-deleted then re-added next pass — and `PlaylistEngine.spliceIn` front-splices
+  re-adds, so the *same* ~80 photos resurfaced every ~30–60 min ("same photos repeating").
+  **Mitigation (not a server fix):** mirror deletion is now **debounced** — a photo must be absent from
+  `DELETE_MISS_STREAK` (3) consecutive full syncs before it's removed (`photos.missStreak`,
+  `MetadataSyncer`). Flicker recovers on the next pass and never crosses the threshold; a genuine
+  removal/hide is absent every pass and still leaves the frame within ~1.5 h. A proper server-side fix
+  would be the timeline-bucket API (month-partitioned, stable) or a deterministic secondary sort if the
+  endpoint ever accepts one.
 - **⚠️ Bug caught by live testing — `encodeDefaults`:** kotlinx.serialization omits default-valued
   fields unless `encodeDefaults=true`. Without it, `type=IMAGE`/`isArchived=false`/`isVisible=true`
   were silently dropped from every request, so the server applied none of them (only weaker

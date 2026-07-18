@@ -50,6 +50,10 @@ data class PlaylistPhoto(
     val takenAt: Instant?,
     val addedAt: Instant,
     val isFavorite: Boolean = false,
+    /** When this photo was last shown, or null if never. Orders the shuffle least-recently-shown
+     *  first so photos don't repeat until the whole library has cycled — persisted, so restarts
+     *  resume roaming the un-shown remainder rather than replaying recent photos. */
+    val lastShownAt: Instant? = null,
 ) {
     val isPortrait: Boolean get() = orientation.isPortrait
 }

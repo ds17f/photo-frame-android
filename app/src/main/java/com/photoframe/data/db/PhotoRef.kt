@@ -16,6 +16,10 @@ data class PhotoRef(
     val takenAt: Long?,
     val addedAt: Long,
     val isFavorite: Boolean,
+    /** Last time this photo was shown (epoch millis), or null if never. Orders the shuffle so
+     *  recently-shown photos sink to the back and don't repeat until the library cycles — across
+     *  restarts too, since it's persisted. */
+    val lastShownAt: Long?,
 ) {
     /** Stable per-photo key, matching [PhotoEntity.key]. */
     val key: String get() = "$sourceId/$remoteId"
@@ -32,6 +36,12 @@ data class SourceIndexRow(
     val status: String,
     val localPath: String?,
     val isFavorite: Boolean,
+)
+
+/** A photo past the miss-streak threshold, to be mirror-deleted: its key and cache file to reclaim. */
+data class PendingDeletion(
+    val remoteId: String,
+    val localPath: String?,
 )
 
 /**

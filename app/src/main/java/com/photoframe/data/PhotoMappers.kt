@@ -14,6 +14,7 @@ fun PhotoEntity.toPlaylistPhoto(): PlaylistPhoto =
         takenAt = takenAt?.let(Instant::ofEpochMilli),
         addedAt = Instant.ofEpochMilli(addedAt),
         isFavorite = isFavorite,
+        lastShownAt = lastShownAt?.let(Instant::ofEpochMilli),
     )
 
 /** Same projection from the lightweight [PhotoRef] the playlist observes. */
@@ -24,4 +25,5 @@ fun PhotoRef.toPlaylistPhoto(): PlaylistPhoto =
         takenAt = takenAt?.let(Instant::ofEpochMilli),
         addedAt = Instant.ofEpochMilli(addedAt),
         isFavorite = isFavorite,
+        lastShownAt = lastShownAt?.let(Instant::ofEpochMilli),
     )

@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PhotoEntity::class, SourceEntity::class, SyncLogEntity::class],
-    version = 4,
+    version = 5,
     // Schema export is deferred until the network sources stabilize the schema and real
     // migrations begin; a personal sideloaded app can fall back to destructive migration in
     // the meantime (the cache re-syncs from the source on first run after an upgrade).
@@ -64,6 +64,17 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 → v5: add `photos.missStreak` (debounced mirror deletion). Additive column; existing
+         * rows default to 0 (a fresh streak) and accrue misses only if the listing stops covering
+         * them. In-place ALTER preserves the cache and show history.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `photos` ADD COLUMN `missStreak` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): PhotoFrameDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -71,7 +82,7 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
                     PhotoFrameDatabase::class.java,
                     "photoframe.db",
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration() // backstop for any other version gap
                     .build()
                     .also { instance = it }

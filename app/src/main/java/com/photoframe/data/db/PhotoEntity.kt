@@ -40,6 +40,11 @@ data class PhotoEntity(
     val contentHash: String? = null,
     /** Whether the source marks this photo a favorite; biases the slideshow toward it. */
     val isFavorite: Boolean = false,
+    /** Consecutive full syncs in which the remote listing did *not* return this photo. Mirror
+     *  deletion is debounced on this: Immich's offset pagination intermittently drops ~1 asset per
+     *  page boundary, so a single miss is unreliable. A real removal/hide is absent every pass and
+     *  climbs to the delete threshold; pagination flicker recovers next pass and resets to 0. */
+    val missStreak: Int = 0,
 ) {
     /** Stable per-photo key used by the playlist engine and UI. */
     val key: String get() = "$sourceId/$remoteId"

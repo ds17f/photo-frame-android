@@ -35,7 +35,7 @@ interface PhotoDao {
      * page, then the last row's (sourceId, remoteId) for the next. All real keys sort after ("", "").
      */
     @Query(
-        "SELECT sourceId, remoteId, width, height, takenAt, addedAt, isFavorite FROM photos " +
+        "SELECT sourceId, remoteId, width, height, takenAt, addedAt, isFavorite, lastShownAt FROM photos " +
             "WHERE (sourceId > :afterSourceId) OR (sourceId = :afterSourceId AND remoteId > :afterRemoteId) " +
             "ORDER BY sourceId, remoteId LIMIT :limit",
     )
@@ -183,6 +183,24 @@ interface PhotoDao {
 
     @Query("DELETE FROM photos WHERE sourceId = :sourceId AND remoteId IN (:remoteIds)")
     suspend fun deleteFromSource(sourceId: String, remoteIds: List<String>)
+
+    // ---- Debounced mirror deletion (miss-streak) --------------------------------------------
+
+    /** Bump the consecutive-miss counter for photos the current full listing didn't return. */
+    @Query("UPDATE photos SET missStreak = missStreak + 1 WHERE sourceId = :sourceId AND remoteId IN (:remoteIds)")
+    suspend fun incrementMissStreak(sourceId: String, remoteIds: List<String>)
+
+    /** Reset the miss counter for photos the listing covered again (flicker recovered). */
+    @Query("UPDATE photos SET missStreak = 0 WHERE sourceId = :sourceId AND remoteId IN (:remoteIds)")
+    suspend fun resetMissStreak(sourceId: String, remoteIds: List<String>)
+
+    /** Photos currently mid-streak (missed at least once) — a small set, used to find recoveries. */
+    @Query("SELECT remoteId FROM photos WHERE sourceId = :sourceId AND missStreak > 0")
+    suspend fun remoteIdsWithMissStreak(sourceId: String): List<String>
+
+    /** Photos absent from the listing for [threshold]+ consecutive syncs — safe to mirror-delete. */
+    @Query("SELECT remoteId, localPath FROM photos WHERE sourceId = :sourceId AND missStreak >= :threshold")
+    suspend fun missStreakExceeding(sourceId: String, threshold: Int): List<PendingDeletion>
 
     @Query("DELETE FROM photos WHERE sourceId = :sourceId")
     suspend fun deleteAllForSource(sourceId: String)

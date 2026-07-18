@@ -27,7 +27,13 @@ object PhotoOrdering {
     ): List<PlaylistPhoto> {
         if (photos.size <= 1) return photos.toList()
         return when (mode) {
-            OrderMode.SHUFFLE -> photos.shuffled(random)
+            // Shuffle, then sink recently-shown photos to the back: never-shown come first (in
+            // random order — the stable sort preserves the shuffle among equal/null keys), then the
+            // rest least-recently-shown first. Because lastShownAt is persisted, a restart rebuilds
+            // the cycle roaming the un-shown remainder instead of replaying what was just on screen —
+            // no repeats until the whole library has cycled.
+            OrderMode.SHUFFLE ->
+                photos.shuffled(random).sortedWith(compareBy(nullsFirst(naturalOrder())) { it.lastShownAt })
             OrderMode.CHRONOLOGICAL -> photos.sortedWith(byTakenAt(ascending = true))
             OrderMode.NEWEST_FIRST -> photos.sortedWith(byTakenAt(ascending = false))
             OrderMode.RECENCY_BOOSTED_SHUFFLE ->

@@ -44,6 +44,9 @@ data class DisplaySettings(
     val clockCorner: Corner = Corner.TOP_START,
     val clockSize: FontSize = FontSize.MEDIUM,
     val captionEnabled: Boolean = true,
+    /** When on, append one timestamped row per shown photo to a persistent playback log file
+     *  (diagnostics — inspect for repeats). Default on for now. See [com.photoframe.diagnostics.PlaybackLog]. */
+    val playbackLogEnabled: Boolean = true,
 ) {
     companion object {
         val INTERVAL_RANGE = 5..3600           // 5 s – 1 h (DESIGN §7)

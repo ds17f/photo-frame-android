@@ -64,6 +64,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private val sourceRepository = container.sourceRepository
     private val photoSourceFactory = container.photoSourceFactory
     private val prefetcher: PhotoPrefetcher = container.photoPrefetcher
+    private val playbackLog = com.photoframe.diagnostics.PlaybackLog(app)
 
     /** One-shot user messages (e.g. delete result) for the UI to surface as a toast. */
     private val _events = Channel<String>(Channel.BUFFERED)
@@ -344,6 +345,11 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.value = _uiState.value.copy(slide = ui)
         markShown(ui)
         Log.i(TAG, "show '${slide.logId()}' fav=${slide.anyFavorite()} bag=${engine.size} share=${engine.favoriteShare}")
+        // Persistent, reboot-safe playback record — one timestamped row per shown photo (URL, or the
+        // photo id for sources without a durable URL). Off-thread; won't block the advance.
+        if (_uiState.value.settings.playbackLogEnabled) {
+            for (photo in ui.photos) playbackLog.append(photoWebUrl(photo) ?: photo.id)
+        }
     }
 
     /** Short photo ids for logs (drops the sourceId prefix). */

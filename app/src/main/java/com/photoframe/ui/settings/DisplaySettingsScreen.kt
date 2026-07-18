@@ -165,6 +165,12 @@ fun DisplaySettingsScreen(
             SwitchRow("Show photo caption", settings.captionEnabled) { on ->
                 onUpdate { it.copy(captionEnabled = on) }
             }
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("Diagnostics")
+            SwitchRow("Log shown photos to file", settings.playbackLogEnabled) { on ->
+                onUpdate { it.copy(playbackLogEnabled = on) }
+            }
             Spacer(Modifier.height(32.dp))
         }
     }

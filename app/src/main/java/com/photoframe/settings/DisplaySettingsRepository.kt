@@ -38,6 +38,7 @@ class DisplaySettingsRepository(private val context: Context) {
             prefs[Keys.CLOCK_CORNER] = next.clockCorner.name
             prefs[Keys.CLOCK_SIZE] = next.clockSize.name
             prefs[Keys.CAPTION_ENABLED] = next.captionEnabled
+            prefs[Keys.PLAYBACK_LOG] = next.playbackLogEnabled
         }
     }
 
@@ -56,6 +57,7 @@ class DisplaySettingsRepository(private val context: Context) {
             clockCorner = enumOr(this[Keys.CLOCK_CORNER], d.clockCorner),
             clockSize = enumOr(this[Keys.CLOCK_SIZE], d.clockSize),
             captionEnabled = this[Keys.CAPTION_ENABLED] ?: d.captionEnabled,
+            playbackLogEnabled = this[Keys.PLAYBACK_LOG] ?: d.playbackLogEnabled,
         )
     }
 
@@ -75,5 +77,6 @@ class DisplaySettingsRepository(private val context: Context) {
         val CLOCK_CORNER = stringPreferencesKey("clock_corner")
         val CLOCK_SIZE = stringPreferencesKey("clock_size")
         val CAPTION_ENABLED = booleanPreferencesKey("caption_enabled")
+        val PLAYBACK_LOG = booleanPreferencesKey("playback_log_enabled")
     }
 }

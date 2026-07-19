@@ -15,8 +15,11 @@ assumed (per CLAUDE.md and PLAN.md builder notes).
     (package `com.photoframe` + this SHA-1). Note the `.debug` build has applicationId
     `com.photoframe.debug` and is signed with the debug key — register that separately if
     testing OAuth on a debug build.
-- **Toolchain:** compileSdk 35, targetSdk 35, minSdk 28, Java 17 toolchain
+- **Toolchain:** compileSdk 35, targetSdk 35, minSdk 25, Java 17 toolchain
   (auto-provisioned via the Gradle foojay resolver), AGP 8.7.3 / Gradle 8.13, Kotlin 2.0.21.
+  - minSdk was lowered 28 → 25 for the Fire TV Stick 4K 1st gen (Fire OS 6 / Android 7.1);
+    `java.time.*` (used app-wide) is API 26+, so **core-library desugaring** is enabled
+    (`isCoreLibraryDesugaringEnabled` + `desugar_jdk_libs`) to backport it. See FIRETV_PLAN.md.
 - **GMS check:** `releaseRuntimeClasspath` verified free of `com.google.android.gms`,
   `com.google.firebase`, and `play-services` (Phase 0). Re-run on every new dependency:
   `./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep -Ei 'gms|firebase|play-services'`

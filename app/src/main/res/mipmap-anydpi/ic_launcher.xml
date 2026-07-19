@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-API-26 launcher icon fallback. API 26+ uses the adaptive-icon in mipmap-anydpi-v26
+  (more specific qualifier wins); API 25 devices (Fire TV Stick 4K 1st gen, Fire OS 6)
+  fall back to this flattened layer-list of the same vector foreground/background.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>

@@ -1,10 +1,33 @@
 # Fire TV Stick Port — Plan
 
-Status: **planned, not started.** Written 2026-07-15. Target device: the owner's older
-Fire TV Stick reporting SDK 25 — i.e. **Fire OS 6 (Android 7.1), almost certainly a Fire
-TV Stick 4K 1st gen (2018, `Build.MODEL` AFTMM)**. Goal: the slideshow runs on the TV
-while **Spotify keeps playing in the background**, with the whole app usable from the
-Fire TV remote (D-pad + select + back + home + menu + play/pause — no touch).
+Status: **code complete for T1–T3, awaiting on-device verification** (updated 2026-07-19;
+user confirmed the device is a **Fire TV Stick 4K 1st gen**). Target device: the owner's
+older Fire TV Stick reporting SDK 25 — **Fire OS 6 (Android 7.1), Fire TV Stick 4K 1st gen
+(2018, `Build.MODEL` AFTMM)**. Goal: the slideshow runs on the TV while **Spotify keeps
+playing in the background**, with the whole app usable from the Fire TV remote (D-pad +
+select + back + home + menu — no touch; play/pause left to the music app).
+
+**Done in code (needs the stick to verify):**
+- T1 — `minSdk 28 → 25`; core-library desugaring enabled (fixes all `java.time`).
+- T1 icon — pre-26 fallback done as a **vector `layer-list` in `mipmap-anydpi`** (not raster
+  PNGs as originally sketched) — reuses the existing vector fore/background, no binaries.
+- T2 — `LEANBACK_LAUNCHER` category added alongside `LAUNCHER`; `touchscreen` +
+  `leanback` `uses-feature required=false`; `android:banner=@drawable/tv_banner` (vector).
+  `screenOrientation` left as `fullSensor` (harmless landscape on the sensorless stick;
+  changing it would lock the tablet's orientation — deliberately not touched).
+- T3 — D-pad layer: Left/Right = prev/next, Centre = show controls, MENU = per-photo actions,
+  Play/Pause **not handled** (Spotify hard rule). Controls bar is focus-navigable with a
+  bright ring; shared `Modifier.tvFocusHighlight()` + `rememberInitialFocusRequester()` in
+  `ui/tv/TvFocus.kt`; every settings/setup screen grabs initial focus.
+
+**Still open / device-gated:**
+- T0 probes (Spotify-over-app, TLS to Immich, EncryptedSharedPreferences) — not yet run.
+- Blocker #6 (TLS / ISRG Root X1) — **network-security-config NOT added**; gated on the T0.2
+  probe result, per the plan. First thing to check if Immich sync fails on the stick.
+- Release-build verification on the stick (R8 / `ClassValue` keep rule) — debug is the dev
+  target for now, matching the tablet workflow.
+- T4/T5 (TV polish, Spotify acceptance) — quiet-hours already renders a full-screen black
+  Box while "asleep", so the HDMI no-op brightness path is already backed by real black frames.
 
 ## Feasibility verdict
 

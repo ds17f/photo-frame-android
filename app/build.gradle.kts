@@ -23,7 +23,10 @@ android {
 
     defaultConfig {
         applicationId = "com.photoframe"
-        minSdk = 28
+        // API 25 (Fire OS 6 / Android 7.1) so the Fire TV Stick 4K (1st gen) can install.
+        // Fire HD tablets run Fire OS 7 (API 28) — comfortably above this floor. java.time.*
+        // is used throughout and is API 26+, so core-library desugaring (below) backports it.
+        minSdk = 25
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
@@ -73,6 +76,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Backport java.time.* etc. to API 25 (Fire TV Stick 4K 1st gen).
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlin {
@@ -98,6 +103,8 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)

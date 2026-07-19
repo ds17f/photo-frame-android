@@ -3,6 +3,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Fire TV / Android TV: the app is fully usable with only a D-pad remote, and a TV
+         has no touchscreen. Declaring these not-required lets it install and appear on the
+         TV home screen (Fire TV Stick 4K, Fire OS 6) while still running on Fire HD tablets. -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
     <!-- Relaunch the slideshow after reboot (DESIGN §10). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Needed to start the activity from the boot receiver on API 29+ (background activity start). -->
@@ -12,6 +22,7 @@
         android:name=".PhotoFrameApp"
         android:allowBackup="false"
         android:largeHeap="true"
+        android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -27,7 +38,10 @@
             android:theme="@style/Theme.PhotoFrame">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <!-- Fire HD / phone launchers -->
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!-- Fire TV / Android TV home screen -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
 

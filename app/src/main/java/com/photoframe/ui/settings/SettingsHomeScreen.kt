@@ -17,6 +17,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import com.photoframe.ui.tv.rememberInitialFocusRequester
+import com.photoframe.ui.tv.tvFocusHighlight
 
 /** Settings hub (DESIGN §11) linking the section screens. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,7 +47,8 @@ fun SettingsHomeScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            SettingsRow("Photo sources", "Immich servers, health, sync now", onSources)
+            // The first row grabs D-pad focus so the remote is live the moment this opens.
+            SettingsRow("Photo sources", "Immich servers, health, sync now", onSources, rememberInitialFocusRequester())
             Divider()
             SettingsRow("Display", "Interval, transitions, Ken Burns, overlays", onDisplay)
             Divider()
@@ -59,10 +64,19 @@ fun SettingsHomeScreen(
 }
 
 @Composable
-private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit) {
+private fun SettingsRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle) },
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clickable(onClick = onClick)
+            .tvFocusHighlight(),
     )
 }

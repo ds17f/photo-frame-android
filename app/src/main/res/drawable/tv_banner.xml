@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Leanback launcher banner (Fire TV / Android TV home row). Nominal 320x180 (16:9).
+  Solid app-background colour with the app glyph centred — a plain, name-free tile is
+  fine for a personal sideloaded frame. Referenced from AndroidManifest android:banner.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#1B1B1F" />
+        </shape>
+    </item>
+    <item
+        android:width="120dp"
+        android:height="120dp"
+        android:gravity="center"
+        android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>

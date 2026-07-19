@@ -17,6 +17,7 @@ kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
 appauth = "0.11.1"
 zxing = "3.5.3"
+desugarJdkLibs = "2.1.4"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -55,6 +56,10 @@ coil-base = { group = "io.coil-kt", name = "coil-base", version.ref = "coil" }
 
 appauth = { group = "net.openid", name = "appauth", version.ref = "appauth" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+# Backports java.time.* (and other Java 8 APIs) to pre-API-26 devices — the Fire TV
+# Stick 4K (1st gen) runs Fire OS 6 / Android 7.1 (API 25). See docs/API_NOTES.md.
+desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }

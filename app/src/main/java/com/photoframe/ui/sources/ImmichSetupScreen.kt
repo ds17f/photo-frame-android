@@ -38,6 +38,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -50,6 +51,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.photoframe.data.source.SourceHealthStatus
 import com.photoframe.data.source.immich.ImmichCatalog
+import com.photoframe.ui.tv.rememberInitialFocusRequester
 
 /**
  * Immich add/edit flow (DESIGN §5.1): server URL + API key with a "Test connection", then the
@@ -94,7 +96,8 @@ fun ImmichSetupScreen(
                 onValueChange = onName,
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth()
+                    .focusRequester(rememberInitialFocusRequester()),
             )
             OutlinedTextField(
                 value = state.baseUrl,

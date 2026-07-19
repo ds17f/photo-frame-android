@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.Image
@@ -30,7 +31,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -297,12 +306,19 @@ fun SlideshowRoute(onExit: () -> Unit) {
             }
 
             if (power.asleep) {
-                // Any tap (or back) wakes the frame for 5 minutes.
+                // Any tap, remote key, or back wakes the frame for 5 minutes.
                 BackHandler { powerVm.wakeTemporarily() }
+                val wakeFocus = remember { FocusRequester() }
+                LaunchedEffect(Unit) { runCatching { wakeFocus.requestFocus() } }
                 Box(
                     Modifier
                         .fillMaxSize()
                         .background(Color.Black)
+                        .focusRequester(wakeFocus)
+                        .focusable()
+                        .onPreviewKeyEvent { ev ->
+                            if (ev.type == KeyEventType.KeyDown) { powerVm.wakeTemporarily(); true } else false
+                        }
                         .pointerInput(Unit) {
                             detectTapGestures { powerVm.wakeTemporarily() }
                         },
@@ -329,6 +345,7 @@ fun SlideshowRoute(onExit: () -> Unit) {
                 onTogglePause = { slideshowVm.togglePause() },
                 onOpenSettings = { slideshowVm.hideControls(); screen = Screen.SETTINGS_HOME },
                 onPhotoLongPress = { menuPhoto = it },
+                onPhotoActions = { photo -> menuPhoto = photo },
             )
 
             // Long-press action menu: the photo, a scan-to-open QR (Immich only), and the actions
@@ -438,13 +455,49 @@ private fun SlideshowContent(
     onTogglePause: () -> Unit,
     onOpenSettings: () -> Unit,
     onPhotoLongPress: (UiPhoto) -> Unit,
+    onPhotoActions: (UiPhoto) -> Unit,
 ) {
     val isLandscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // The photo a remote user acts on from the controls' "…" button: the single photo, or the
+    // primary (left/top) half of a split. Long-press picks the exact half on a touchscreen.
+    val currentPhoto: UiPhoto? = when (val s = state.slide) {
+        is UiSlide.Single -> s.photo
+        is UiSlide.Pair -> s.left
+        null -> null
+    }
+
+    // TV remote input (FIRETV_PLAN §T3). The frame Box holds D-pad focus whenever the controls
+    // are hidden, so Left/Right page photos and Centre reveals the controls (which then take
+    // focus themselves — pause/settings live there). MENU opens the per-photo actions dialog
+    // (the long-press equivalent). Play/Pause is DELIBERATELY not handled: it must fall through
+    // to a background music app (Spotify) — a hard rule, since the frame plays no audio itself.
+    val frameFocus = remember { FocusRequester() }
+    LaunchedEffect(state.controlsVisible) {
+        if (!state.controlsVisible) runCatching { frameFocus.requestFocus() }
+    }
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(frameFocus)
+            .focusable()
+            .onKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (ev.key) {
+                    // Per-photo actions from anywhere (mirrors touch long-press). Falls through
+                    // when there's no current photo so the key isn't silently swallowed.
+                    Key.Menu -> currentPhoto?.let { onPhotoActions(it); true } ?: false
+                    else -> if (!state.controlsVisible) when (ev.key) {
+                        Key.DirectionLeft -> { onPrevious(); true }
+                        Key.DirectionRight -> { onNext(); true }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter,
+                        Key.DirectionUp, Key.DirectionDown -> { onTap(); true }
+                        else -> false
+                    } else false
+                }
+            }
             .pointerInput(state.slide, isLandscape) {
                 detectTapGestures(
                     onTap = { onTap() },
@@ -492,6 +545,7 @@ private fun SlideshowContent(
             onNext = onNext,
             onTogglePause = onTogglePause,
             onOpenSettings = onOpenSettings,
+            onPhotoActions = currentPhoto?.let { p -> { onPhotoActions(p) } },
         )
     }
 }

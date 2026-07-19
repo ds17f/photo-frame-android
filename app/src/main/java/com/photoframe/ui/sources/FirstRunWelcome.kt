@@ -12,8 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.photoframe.ui.tv.rememberInitialFocusRequester
 
 /**
  * First-run welcome (DESIGN §11) — the entry to the wizard. "Get started" opens the Immich setup;
@@ -37,6 +39,9 @@ fun FirstRunWelcome(onGetStarted: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.size(32.dp))
-        Button(onClick = onGetStarted) { Text("Get started") }
+        Button(
+            onClick = onGetStarted,
+            modifier = Modifier.focusRequester(rememberInitialFocusRequester()),
+        ) { Text("Get started") }
     }
 }

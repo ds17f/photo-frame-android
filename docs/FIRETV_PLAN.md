@@ -21,9 +21,9 @@ select + back + home + menu — no touch; play/pause left to the music app).
   `ui/tv/TvFocus.kt`; every settings/setup screen grabs initial focus.
 
 **Still open / device-gated:**
-- T0 probes (Spotify-over-app, TLS to Immich, EncryptedSharedPreferences) — not yet run.
-- Blocker #6 (TLS / ISRG Root X1) — **network-security-config NOT added**; gated on the T0.2
-  probe result, per the plan. First thing to check if Immich sync fails on the stick.
+- T0 probes (Spotify-over-app, EncryptedSharedPreferences) — not yet run.
+- ~~Blocker #6 (TLS)~~ — **resolved**: server uses a GoDaddy cert Android 7.1 already trusts
+  (verified via `openssl s_client`, chain OK). No network-security-config needed.
 - Release-build verification on the stick (R8 / `ClassValue` keep rule) — debug is the dev
   target for now, matching the tablet workflow.
 - T4/T5 (TV polish, Spotify acceptance) — quiet-hours already renders a full-screen black
@@ -66,7 +66,7 @@ Sources: developer.amazon.com/docs/fire-tv/differences-from-android-tv-developme
 | 3 | **Zero D-pad support** — no `focusable`/`onKeyEvent`/`FocusRequester` anywhere; all interaction is tap / long-press / swipe | all of `ui/` |
 | 4 | No `LEANBACK_LAUNCHER` category, no touchscreen `uses-feature`, no TV banner — app won't appear properly in the Fire TV launcher | `AndroidManifest.xml` |
 | 5 | Launcher icons are adaptive-only (`mipmap-anydpi-v26`), no pre-26 PNG fallback — blank/default icon on API 25 | `res/` |
-| 6 | TLS trust: Android 7.1 predates ISRG Root X1 (Let's Encrypt) — 7.1.**1** was the cutoff. No `networkSecurityConfig` exists to bundle roots | `ImmichClient`, manifest |
+| 6 | ~~TLS trust: Android 7.1 predates ISRG Root X1 (Let's Encrypt)~~ — **NOT A BLOCKER (verified 2026-07-19)**. The Immich server uses a **GoDaddy** wildcard cert chaining to *Go Daddy Root Certificate Authority - G2*, in Android's trust store since ~4.x; the handshake sends the G2 intermediate. `openssl s_client` → `Verify return code: 0`. No `networkSecurityConfig` needed. | n/a |
 
 Non-blockers with TV wrinkles:
 
@@ -110,8 +110,8 @@ Acceptance: three yes/no answers recorded here; plan below adjusted if any is "n
   `java.time` usage at once. Full-app regression on the **tablet** afterward: desugaring
   rewrites bytecode globally, so the tablet build is the thing to re-verify.
 - Legacy raster launcher icons for pre-26 (`mipmap-{m,h,xh,xxh,xxxh}dpi` PNGs).
-- Network-security-config with `<trust-anchors>` = system + bundled ISRG Root X1/X2
-  (or the LAN CA), **if** T0.2 showed failure.
+- ~~Network-security-config with bundled roots~~ — **not needed** (blocker #6 resolved: the
+  server's GoDaddy cert is already trusted on Android 7.1). Nothing to add here.
 - Audit any behavior gated between 25 and 28 (only one `SDK_INT` check exists — the
   blur fallback in `BlurFillBackground.kt`, already safe).
 

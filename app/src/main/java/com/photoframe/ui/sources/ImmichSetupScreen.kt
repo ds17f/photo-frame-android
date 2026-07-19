@@ -79,7 +79,13 @@ fun ImmichSetupScreen(
             TopAppBar(
                 title = { Text(if (state.editingId == null) "Add Immich" else "Edit Immich") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    // Focus the back button, not a text field: focusing an OutlinedTextField
+                    // auto-opens the Fire TV on-screen keyboard over the album list, which is
+                    // pure obstruction when the config arrived pre-filled via immich_import.json.
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.focusRequester(rememberInitialFocusRequester()),
+                    ) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -96,8 +102,7 @@ fun ImmichSetupScreen(
                 onValueChange = onName,
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-                    .focusRequester(rememberInitialFocusRequester()),
+                modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = state.baseUrl,

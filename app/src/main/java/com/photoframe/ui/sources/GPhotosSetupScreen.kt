@@ -66,7 +66,12 @@ fun GPhotosSetupScreen(
             TopAppBar(
                 title = { Text(if (state.sourceId == null) "Add Google Photos" else "Add photos") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    // Focus the back button, not a text field — see ImmichSetupScreen: focusing
+                    // an OutlinedTextField auto-opens the Fire TV keyboard on entry.
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.focusRequester(rememberInitialFocusRequester()),
+                    ) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -112,8 +117,7 @@ private fun ConfigStep(
         onValueChange = onName,
         label = { Text("Name") },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-            .focusRequester(rememberInitialFocusRequester()),
+        modifier = Modifier.fillMaxWidth(),
     )
     OutlinedTextField(
         value = state.clientId,

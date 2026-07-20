@@ -16,7 +16,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -95,14 +94,16 @@ fun StorageSettingsScreen(
             }
             Divider()
 
-            // Cache cap (moved here from Cache & sync)
+            // Cache cap (moved here from Cache & sync). Stepper (not Slider) so the Fire TV
+            // remote can adjust it; position is in 256 MB units (0.25–32 GB), +/- 1 GB per press.
             Column {
-                Text("Cache cap: ${formatBytes(settings.cacheCapBytes)}", fontWeight = FontWeight.SemiBold)
-                val capGb = settings.cacheCapBytes / (1024.0 * 1024 * 1024)
-                Slider(
-                    value = capGb.toFloat(),
-                    onValueChange = { gb -> onCap((gb.toDouble() * 1024 * 1024 * 1024).toLong()) },
-                    valueRange = 0.25f..32f,
+                StepperRow(
+                    label = "Cache cap",
+                    valueLabel = formatBytes(settings.cacheCapBytes),
+                    position = (settings.cacheCapBytes / (256L * 1024 * 1024)).toInt().coerceIn(1, 128),
+                    range = 1..128,
+                    step = 4,
+                    onPosition = { q -> onCap(q.toLong() * 256L * 1024 * 1024) },
                 )
                 Text(
                     "Using ${formatBytes(cacheUsageBytes)} of ${formatBytes(settings.cacheCapBytes)}. " +

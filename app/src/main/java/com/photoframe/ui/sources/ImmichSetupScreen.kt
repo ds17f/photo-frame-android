@@ -36,8 +36,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -138,22 +141,42 @@ fun ImmichSetupScreen(
 
             if (state.connected) {
                 Divider()
-                if (state.loadingCatalog) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Text("Loading albums and people…")
-                    }
-                } else {
-                    SelectionSection(
-                        state = state,
-                        onToggleAlbum = onToggleAlbum,
-                        onTogglePerson = onTogglePerson,
-                        onFavorites = onFavorites,
-                        onWholeLibrary = onWholeLibrary,
-                        onRollingWindow = onRollingWindow,
+
+                // Most setups show the whole library or favorites rather than hand-picked
+                // albums, so those two + Save sit at the top — reachable without scrolling
+                // past a long album list. Once connected, focus jumps straight here (skipping
+                // the text fields, which would pop the Fire TV keyboard). The album/person
+                // picker follows below for when specific albums are wanted.
+                val quickFocus = remember { FocusRequester() }
+                LaunchedEffect(state.connected) {
+                    if (state.connected) runCatching { quickFocus.requestFocus() }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Whole library", Modifier.weight(1f))
+                    Switch(
+                        checked = state.selection.wholeLibrary,
+                        onCheckedChange = onWholeLibrary,
+                        modifier = Modifier.focusRequester(quickFocus),
                     )
                 }
+                if (state.selection.wholeLibrary) {
+                    Text(
+                        "Limit to recent",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        RollingWindowChip("All", null, state.selection.rollingWindowDays, onRollingWindow)
+                        RollingWindowChip("1 year", 365, state.selection.rollingWindowDays, onRollingWindow)
+                        RollingWindowChip("6 months", 180, state.selection.rollingWindowDays, onRollingWindow)
+                        RollingWindowChip("3 months", 90, state.selection.rollingWindowDays, onRollingWindow)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Favorites", Modifier.weight(1f))
+                    Switch(checked = state.selection.favoritesOnly, onCheckedChange = onFavorites)
+                }
+
                 Spacer(Modifier.size(8.dp))
                 Button(
                     onClick = onSave,
@@ -173,6 +196,22 @@ fun ImmichSetupScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+
+                // Optional: hand-pick specific albums / people (loads after connecting).
+                Divider()
+                if (state.loadingCatalog) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Loading albums and people…")
+                    }
+                } else {
+                    AlbumPersonPicker(
+                        state = state,
+                        onToggleAlbum = onToggleAlbum,
+                        onTogglePerson = onTogglePerson,
+                    )
+                }
             }
         }
     }
@@ -189,17 +228,14 @@ private fun ConnectionResult(state: ImmichSetupState) {
 }
 
 @Composable
-private fun SelectionSection(
+private fun AlbumPersonPicker(
     state: ImmichSetupState,
     onToggleAlbum: (String) -> Unit,
     onTogglePerson: (String) -> Unit,
-    onFavorites: (Boolean) -> Unit,
-    onWholeLibrary: (Boolean) -> Unit,
-    onRollingWindow: (Int?) -> Unit,
 ) {
     val selection = state.selection
 
-    Text("Albums", fontWeight = FontWeight.SemiBold)
+    Text("Or pick specific albums", fontWeight = FontWeight.SemiBold)
     if (state.albums.isEmpty()) {
         Text("No albums", style = MaterialTheme.typography.bodySmall)
     } else {
@@ -234,29 +270,6 @@ private fun SelectionSection(
                     onClick = { onTogglePerson(person.id) },
                 )
             }
-        }
-    }
-
-    Spacer(Modifier.size(8.dp))
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Favorites", Modifier.weight(1f))
-        Switch(checked = selection.favoritesOnly, onCheckedChange = onFavorites)
-    }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Whole library", Modifier.weight(1f))
-        Switch(checked = selection.wholeLibrary, onCheckedChange = onWholeLibrary)
-    }
-    if (selection.wholeLibrary) {
-        Text(
-            "Limit to recent",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RollingWindowChip("All", null, selection.rollingWindowDays, onRollingWindow)
-            RollingWindowChip("1 year", 365, selection.rollingWindowDays, onRollingWindow)
-            RollingWindowChip("6 months", 180, selection.rollingWindowDays, onRollingWindow)
-            RollingWindowChip("3 months", 90, selection.rollingWindowDays, onRollingWindow)
         }
     }
 }

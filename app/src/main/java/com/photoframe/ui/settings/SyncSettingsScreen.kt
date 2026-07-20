@@ -16,7 +16,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -60,15 +59,15 @@ fun SyncSettingsScreen(
             Modifier.fillMaxSize().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Sync interval
+            // Sync interval — stepper (not Slider) so the Fire TV remote can adjust it; ±15 min.
             Column {
-                Text("Sync every ${settings.syncIntervalMinutes} min", fontWeight = FontWeight.SemiBold)
-                Slider(
-                    value = settings.syncIntervalMinutes.toFloat(),
-                    onValueChange = { v ->
-                        onUpdate { it.copy(syncIntervalMinutes = v.toInt()) }
-                    },
-                    valueRange = SyncSettings.INTERVAL_RANGE.first.toFloat()..SyncSettings.INTERVAL_RANGE.last.toFloat(),
+                StepperRow(
+                    label = "Sync interval",
+                    valueLabel = "${settings.syncIntervalMinutes} min",
+                    position = settings.syncIntervalMinutes,
+                    range = SyncSettings.INTERVAL_RANGE.first..SyncSettings.INTERVAL_RANGE.last,
+                    step = 15,
+                    onPosition = { v -> onUpdate { it.copy(syncIntervalMinutes = v) } },
                 )
                 Text(
                     "How often the frame checks Immich for new photos (min 15 min).",

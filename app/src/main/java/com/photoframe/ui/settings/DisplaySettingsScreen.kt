@@ -20,7 +20,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -76,11 +75,11 @@ fun DisplaySettingsScreen(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
             SectionHeader("Playback")
-            SliderRow(
+            StepperRow(
                 label = "Photo interval",
                 valueLabel = formatSeconds(settings.intervalSeconds),
-                steps = INTERVAL_STEPS.size,
                 position = INTERVAL_STEPS.indexOfNearest(settings.intervalSeconds),
+                range = 0..INTERVAL_STEPS.lastIndex,
                 onPosition = { i -> onUpdate { it.copy(intervalSeconds = INTERVAL_STEPS[i]) } },
             )
             ChoiceRow(
@@ -91,12 +90,12 @@ fun DisplaySettingsScreen(
                 onSelect = { m -> onUpdate { it.copy(orderMode = m) } },
             )
             if (settings.orderMode == OrderMode.RECENCY_BOOSTED_SHUFFLE) {
-                SliderRow(
+                StepperRow(
                     label = "Boost photos from the last",
                     valueLabel = "${settings.recencyWindowDays} days",
-                    steps = 0,
                     position = settings.recencyWindowDays,
                     range = DisplaySettings.RECENCY_WINDOW_DAYS_RANGE.first..DisplaySettings.RECENCY_WINDOW_DAYS_RANGE.last,
+                    step = 5,
                     onPosition = { d -> onUpdate { it.copy(recencyWindowDays = d) } },
                 )
             }
@@ -104,16 +103,16 @@ fun DisplaySettingsScreen(
             if (settings.orderMode == OrderMode.SHUFFLE ||
                 settings.orderMode == OrderMode.RECENCY_BOOSTED_SHUFFLE
             ) {
-                SliderRow(
+                StepperRow(
                     label = "Show favorites more often",
                     valueLabel = when (settings.favoriteSharePercent) {
                         0 -> "Off"
                         100 -> "Favorites only"
                         else -> "~${settings.favoriteSharePercent}% of photos"
                     },
-                    steps = 0,
                     position = settings.favoriteSharePercent,
                     range = DisplaySettings.FAVORITE_SHARE_PERCENT_RANGE.first..DisplaySettings.FAVORITE_SHARE_PERCENT_RANGE.last,
+                    step = 10,
                     onPosition = { p -> onUpdate { it.copy(favoriteSharePercent = p) } },
                 )
             }
@@ -127,12 +126,12 @@ fun DisplaySettingsScreen(
                 labelOf = { it.name.lowercase().replaceFirstChar(Char::uppercase).replace('_', ' ') },
                 onSelect = { t -> onUpdate { it.copy(transition = t) } },
             )
-            SliderRow(
+            StepperRow(
                 label = "Transition length",
                 valueLabel = "%.1fs".format(settings.transitionSeconds),
-                steps = 0,
                 position = (settings.transitionSeconds * 10).roundToInt(),
                 range = 5..30,
+                step = 5,
                 onPosition = { p -> onUpdate { it.copy(transitionSeconds = p / 10f) } },
             )
             SwitchRow("Ken Burns pan & zoom", settings.kenBurnsEnabled) { on ->
@@ -223,32 +222,6 @@ private fun <T> ChoiceRow(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun SliderRow(
-    label: String,
-    valueLabel: String,
-    steps: Int,
-    position: Int,
-    range: IntRange = 0..(steps - 1).coerceAtLeast(1),
-    onPosition: (Int) -> Unit,
-) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(label, fontSize = 16.sp)
-            Text(valueLabel, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-        }
-        Slider(
-            value = position.toFloat(),
-            onValueChange = { onPosition(it.roundToInt()) },
-            valueRange = range.first.toFloat()..range.last.toFloat(),
-            steps = (range.last - range.first - 1).coerceAtLeast(0),
-        )
     }
 }
 

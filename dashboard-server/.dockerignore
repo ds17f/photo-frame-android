@@ -1,0 +1,10 @@
+*
+!server.py
+!config_store.py
+!calendar_feed.py
+!school_calendar.py
+!lunch_calendar.py
+!requirements.txt
+!index.html
+!admin.html
+!Dockerfile

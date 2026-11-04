@@ -1,0 +1,27 @@
+services:
+  photo-frame-dashboard:
+    build: .
+    image: homelab/photo-frame-dashboard:local
+    container_name: photo-frame-dashboard
+    restart: unless-stopped
+    environment:
+      TZ: America/Phoenix
+    volumes:
+      - ./config:/config:rw,Z
+      - ./lunch-calendars:/app/lunch-calendars:ro,Z
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - caddy_network
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  caddy_network:
+    external: true

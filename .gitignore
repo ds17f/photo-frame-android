@@ -22,3 +22,6 @@ keystore.properties
 
 # Kotlin compiler daemon logs
 .kotlin/
+
+# School lunch menu PDFs name the school; keep them local only
+docs/MealViewer*.pdf

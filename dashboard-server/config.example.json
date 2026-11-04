@@ -1,0 +1,39 @@
+{
+  "school_timezone": "America/Denver",
+  "weather": {
+    "latitude": 39.7392,
+    "longitude": -104.9903,
+    "location": "Example City"
+  },
+  "school_dates": {
+    "2026-10-19": 1,
+    "2026-10-20": 2,
+    "2026-10-21": 3,
+    "2026-10-22": 4,
+    "2026-10-23": "no_school",
+    "2026-10-26": 1
+  },
+  "children": [
+    {
+      "name": "Example Child A",
+      "days": {
+        "1": {"activity": "Library", "sneakers": false},
+        "2": {"activity": "PE", "sneakers": true},
+        "3": {"activity": "Art", "sneakers": false},
+        "4": {"activity": "Music", "sneakers": false}
+      }
+    },
+    {
+      "name": "Example Child B",
+      "days": {
+        "1": {"activity": "PE", "sneakers": true},
+        "2": {"activity": "Library", "sneakers": false},
+        "3": {"activity": "Music", "sneakers": false},
+        "4": {"activity": "PE", "sneakers": true}
+      }
+    }
+  ],
+  "events": [
+    {"date": "2026-11-05", "title": "Example family event"}
+  ]
+}

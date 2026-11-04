@@ -1,0 +1,7 @@
+# Local family data and Python cache files
+config.json
+config/
+# Lunch menus name the school; keep them local and mount them at runtime
+lunch-calendars/*.json
+__pycache__/
+*.py[cod]

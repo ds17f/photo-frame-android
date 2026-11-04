@@ -39,7 +39,7 @@ object PhotoOrdering {
             OrderMode.RECENCY_BOOSTED_SHUFFLE ->
                 weightedShuffle(photos, random) { p ->
                     if (isRecent(p, now, recencyWindow)) RECENCY_BOOST else 1.0
-                }
+                }.sortedBy { it.lastShownAt != null }
         }
     }
 

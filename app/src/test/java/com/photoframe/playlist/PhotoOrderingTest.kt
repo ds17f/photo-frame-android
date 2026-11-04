@@ -76,4 +76,13 @@ class PhotoOrderingTest {
         assertTrue(order(emptyList(), OrderMode.SHUFFLE).isEmpty())
         assertEquals(1, order(landscapes(1), OrderMode.SHUFFLE).size)
     }
+    @Test fun shuffleModes_prioritizeUnseenPhotos_acrossRestart() {
+        for (mode in listOf(OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE)) {
+            val old = landscapes(100).map { it.copy(lastShownAt = now.minusSeconds(60)) }
+            val unseen = landscapes(100).map { it.copy(id = "unseen-${it.id}", addedAt = now.minusSeconds(900000)) }
+            val result = order(old + unseen, mode)
+            assertTrue("$mode must finish unseen library first", result.take(100).all { it.lastShownAt == null })
+        }
+    }
+
 }

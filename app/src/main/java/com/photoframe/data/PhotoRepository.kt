@@ -3,7 +3,10 @@ package com.photoframe.data
 import com.photoframe.data.db.PhotoDao
 import com.photoframe.data.db.PhotoEntity
 import com.photoframe.data.db.PhotoRef
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Read/write access to the photo index (streaming-cache model, docs/STORAGE_PLAN.md). The playlist
@@ -19,6 +22,25 @@ class PhotoRepository(private val photoDao: PhotoDao) {
 
     /** Live count of cached (READY) photos, for the "N cached" secondary counter. */
     fun observeCachedCount(): Flow<Int> = photoDao.observeCount(PhotoStatus.READY.name)
+
+    /** Find a usable cached image before loading the full index or waiting for any download. */
+    suspend fun startupPhoto(): PhotoEntity? = cachedFallback(emptyList())
+
+    /** A bounded, least-recently-shown local fallback; repair missing files as we encounter them. */
+    suspend fun cachedFallback(excludedKeys: List<String>): PhotoEntity? = withContext(Dispatchers.IO) {
+        val excluded = excludedKeys
+        while (true) {
+            val page = photoDao.cachedFallbackPage(excluded, 32)
+            if (page.isEmpty()) return@withContext null
+            for (photo in page) {
+                val file = photo.localPath?.let(::File)
+                if (file != null && file.isFile && file.length() > 0) return@withContext photo
+                photoDao.markEvicted(photo.sourceId, photo.remoteId)
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        null
+    }
 
     /**
      * Load the entire index as lightweight [PhotoRef]s via keyset paging (never one observed

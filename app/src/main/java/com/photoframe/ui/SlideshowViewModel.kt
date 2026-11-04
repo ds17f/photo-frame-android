@@ -34,7 +34,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Duration
 
@@ -52,7 +51,7 @@ data class SlideshowUiState(
  * Drives the slideshow (streaming-cache model, docs/STORAGE_PLAN.md): seeds fixtures, feeds the
  * **full index** into the [PlaylistEngine] via keyset-paged reads (never one observed full-table
  * query — that overflows the CursorWindow), keeps the [PhotoPrefetcher] pointed at the upcoming
- * horizon, and skips slides whose photos aren't cached yet. The engine reads only from the local
+ * horizon, and keeps uncached slides queued while ready photos play. The engine reads only from the local
  * cache, so playback never blocks on the network (DESIGN §6).
  */
 class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
@@ -86,21 +85,16 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     private var slideJob: Job? = null
     private var controlsHideJob: Job? = null
 
-    /** Identity of the slide currently held pending (peeked, awaiting its cache), and when it first
-     *  became the target — used to skip past a photo that can never be fetched so it can't freeze
-     *  the frame, without discarding merely-slow photos (which are retried next tick). */
-    private var pendingKey: String? = null
-    private var pendingSince = 0L
-
     init {
         // Seed fixtures only in debug builds — a release "fresh install" must start empty so the
         // first-run wizard (Phase 2) drives the user to add a real Immich source (PLAN accept).
         viewModelScope.launch {
-            if (com.photoframe.BuildConfig.DEBUG) runCatching { fixtureImporter.importAll() }
             observeSettings()
             startIndexFeed()
             prefetcher.start()
             restartAdvanceLoop()
+            advance(forward = true) // local cached image first, even before the full index loads
+            if (com.photoframe.BuildConfig.DEBUG) runCatching { fixtureImporter.importAll() }
         }
     }
 
@@ -135,6 +129,8 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
             .launchIn(viewModelScope)
         // A completed prefetch doesn't change the index, so it must NOT trigger a full re-feed. It
         // only needs to nudge the very first slide up promptly once the pool has something to show.
+        // Same-size metadata refreshes (favorites, orientation, replacements) also need a feed.
+        container.syncManager.completed.onEach { reloadSignal.trySend(Unit) }.launchIn(viewModelScope)
         prefetcher.cached
             .onEach { if (_uiState.value.slide == null) advance(forward = true) }
             .launchIn(viewModelScope)
@@ -144,7 +140,14 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
                 delay(RELOAD_DEBOUNCE_MS) // let a burst of changes collapse into one re-feed
                 val refs = withContext(Dispatchers.IO) { photoRepository.loadFullIndex() }
                 photoIndex = refs.associateBy { it.key }
+                val firstFeed = engine.isEmpty
                 engine.setPhotos(refs.map { it.toPlaylistPhoto() })
+                if (firstFeed) {
+                    // The instant startup photo must participate in the same no-repeat cycle.
+                    _uiState.value.slide?.photos?.forEach { photo ->
+                        photoIndex[photo.id]?.let { engine.recordCached(Slide.Single(it.toPlaylistPhoto())) }
+                    }
+                }
                 Log.i(TAG, "feed: index=${refs.size} favorites=${refs.count { it.isFavorite }}")
                 val hadSlide = _uiState.value.slide != null
                 _uiState.value = _uiState.value.copy(photoCount = refs.size, loading = false)
@@ -295,12 +298,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.value = _uiState.value.copy(controlsVisible = false)
     }
 
-    /**
-     * Advance the slideshow one step. Forward advances **commit to the next shuffled photo and wait
-     * for it to be cached** rather than skipping to whatever happens to be cached — so the whole
-     * library rotates (no repeats within a cycle) instead of only the subset that cached fastest.
-     * See [advanceForward]. Backward simply replays cached history.
-     */
+    /** Advance within the scheduled library window; backward replays actual shown history. */
     private fun advance(forward: Boolean) {
         slideJob?.cancel()
         slideJob = viewModelScope.launch {
@@ -310,46 +308,54 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Peek the next shuffled slide (held, not yet consumed), point the prefetcher at it, and wait a
-     * bounded time for its photos to be cached before showing it. If it isn't cached in time we keep
-     * it pending and retry on the next tick — the photo stays in rotation rather than being dropped,
-     * and the current photo simply dwells a little longer. Only if a slide stays unfetchable for
-     * [STUCK_SKIP_MS] (a broken/deleted photo) do we skip past it, so one bad photo can't freeze the
-     * frame; it returns on the next cycle.
+     * Play a ready slide from the scheduled download window. Slow/broken targets stay queued
+     * and protected for retry; they cannot hold the screen or disappear from this cycle.
+     * During an outage, rotate the retained pool by persisted last-shown time.
      */
     private suspend fun advanceForward() {
-        val slide = engine.peekPending() ?: return
-        trackPending(slide)
-        updateHorizon() // prioritise downloading this slide + the buffer ahead of it right now
-
-        // Escape checked *before* the cancellable wait below, so it still fires when a short slide
-        // interval cancels the wait each tick: skip a slide that has been unfetchable too long.
-        if (System.currentTimeMillis() - pendingSince >= STUCK_SKIP_MS &&
-            toDisplayableSlide(slide) == null
-        ) {
-            Log.w(TAG, "skip '${slide.logId()}': never cached in ${STUCK_SKIP_MS}ms (prefetch stuck)")
-            engine.commitPending()
-            pendingKey = null
+        if (_uiState.value.slide == null && showStartupPhoto()) return
+        engine.deferFailed(prefetcher.failedKeys())
+        val next = engine.peekPending() ?: return
+        updateHorizon()
+        val candidates = listOf(next) + engine.scheduledSlides().filter { it != next }
+        for (slide in candidates) {
+            val ui = toDisplayableSlide(slide) ?: continue
+            // A settings/index change during the database reads can invalidate this selection.
+            if (slide !in engine.scheduledSlides() && slide != engine.peekPending()) continue
+            if (slide == engine.peekPending()) engine.commitPending() else engine.commitScheduled(slide)
+            showSlide(ui, "scheduled")
             return
         }
+        val currentIds = _uiState.value.slide?.photos.orEmpty().map { it.id }
+        val fallback = photoRepository.cachedFallback(currentIds) ?: return
+        val ui = UiSlide.Single(fallback.toUiPhoto())
+        engine.recordCached(Slide.Single(fallback.toPlaylistPhoto()))
+        showSlide(ui, "cached fallback")
+    }
 
-        val ui = awaitDisplayable(slide)
-        if (ui == null) {
-            // Not cached in time — hold it and retry next tick. Frequent here = prefetch can't keep
-            // up, which is what makes only the already-cached photos cycle.
-            Log.i(TAG, "hold '${slide.logId()}': not cached yet, prefetch behind (bag=${engine.size})")
-            return
-        }
-        engine.commitPending()
-        pendingKey = null
+    private suspend fun showSlide(ui: UiSlide, reason: String) {
         _uiState.value = _uiState.value.copy(slide = ui)
         markShown(ui)
-        Log.i(TAG, "show '${slide.logId()}' fav=${slide.anyFavorite()} bag=${engine.size} share=${engine.favoriteShare}")
-        // Persistent, reboot-safe playback record — one timestamped row per shown photo (URL, or the
-        // photo id for sources without a durable URL). Off-thread; won't block the advance.
+        Log.i(TAG, "show ${ui.photos.joinToString { it.id.substringAfterLast('/').take(8) }} ($reason)")
         if (_uiState.value.settings.playbackLogEnabled) {
             for (photo in ui.photos) playbackLog.append(photoWebUrl(photo) ?: photo.id)
         }
+    }
+
+    private suspend fun showStartupPhoto(): Boolean {
+        val photo = photoRepository.startupPhoto() ?: return false
+        if (_uiState.value.slide != null) return true
+        val ui = UiSlide.Single(photo.toUiPhoto())
+        _uiState.value = _uiState.value.copy(
+            slide = ui,
+            photoCount = maxOf(1, _uiState.value.photoCount),
+            loading = false,
+        )
+        markShown(ui)
+        restartAdvanceLoop()
+        Log.i(TAG, "startup: showing a cached photo while preparing the full playlist")
+        if (_uiState.value.settings.playbackLogEnabled) playbackLog.append(photo.key)
+        return true
     }
 
     /** Short photo ids for logs (drops the sourceId prefix). */
@@ -365,30 +371,14 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         markShown(ui)
     }
 
-    /** Reset the stuck-skip timer whenever the pending target changes. */
-    private fun trackPending(slide: Slide) {
-        val key = slide.photos.joinToString(",") { it.id }
-        if (key != pendingKey) {
-            pendingKey = key
-            pendingSince = System.currentTimeMillis()
-        }
-    }
-
-    /** Suspend until [slide]'s photos are cached and displayable, or [PREFETCH_WAIT_MS] elapses. */
-    private suspend fun awaitDisplayable(slide: Slide): UiSlide? =
-        withTimeoutOrNull(PREFETCH_WAIT_MS) {
-            var ui = toDisplayableSlide(slide)
-            while (ui == null) {
-                delay(PREFETCH_POLL_MS)
-                ui = toDisplayableSlide(slide)
-            }
-            ui
-        }
-
     /** Push the prefetcher's download horizon = the next [PhotoPrefetcher.HORIZON] upcoming photos. */
     private fun updateHorizon() {
+        // A startup image can precede the engine's first draw. Prime its pending slide so its
+        // full-library horizon starts downloading now, rather than after the first interval.
+        engine.peekPending()
         val keys = engine.peek(PhotoPrefetcher.HORIZON).map { PhotoKey.parse(it.id) }
-        viewModelScope.launch { prefetcher.setHorizon(keys) }
+        val visible = _uiState.value.slide?.photos.orEmpty().map { PhotoKey.parse(it.id) }.toSet()
+        viewModelScope.launch { prefetcher.setHorizon(keys, visible) }
     }
 
     private fun restartAdvanceLoop() {
@@ -398,7 +388,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 val interval = _uiState.value.settings.intervalSeconds.coerceAtLeast(1)
                 delay(interval * 1000L)
-                if (!_uiState.value.isPaused) advance(forward = true)
+                if (!_uiState.value.isPaused && slideJob?.isActive != true) advance(forward = true)
             }
         }
     }
@@ -411,14 +401,15 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             ids.forEach { id ->
-                photoIndex[id]?.let { photoRepository.markShown(it.sourceId, it.remoteId, now) }
+                val key = PhotoKey.parse(id)
+                photoRepository.markShown(key.sourceId, key.remoteId, now)
             }
         }
     }
 
     /**
      * Resolve an engine slide into a displayable UI slide, or null if it can't be shown (photos not
-     * cached / files missing). For a pair with only one cached half, fall back to showing that half.
+     * cached / files missing). Pairs commit only when both halves are ready, preserving coverage.
      */
     private suspend fun toDisplayableSlide(slide: Slide): UiSlide? = when (slide) {
         is Slide.Single -> readyEntity(slide.photo.id)?.let { UiSlide.Single(it.toUiPhoto()) }
@@ -427,8 +418,6 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
             val r = readyEntity(slide.right.id)
             when {
                 l != null && r != null -> UiSlide.Pair(l.toUiPhoto(), r.toUiPhoto())
-                l != null -> UiSlide.Single(l.toUiPhoto())
-                r != null -> UiSlide.Single(r.toUiPhoto())
                 else -> null
             }
         }
@@ -443,7 +432,7 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
         val entity = photoRepository.photoByKey(ref.sourceId, ref.remoteId) ?: return null
         if (entity.status != PhotoStatus.READY.name) return null
         val path = entity.localPath ?: return null
-        val exists = withContext(Dispatchers.IO) { File(path).exists() }
+        val exists = withContext(Dispatchers.IO) { File(path).let { it.isFile && it.length() > 0 } }
         if (!exists) {
             photoRepository.repairMissing(ref.sourceId, ref.remoteId)
             return null
@@ -470,18 +459,6 @@ class SlideshowViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG = "Slideshow"
         private const val CONTROLS_TIMEOUT_MS = 5_000L
-
-        /** How long a forward advance waits for the next slide's photos to be cached before giving
-         *  up for this tick (kept pending and retried). Generous vs a LAN Immich fetch (<1s). */
-        private const val PREFETCH_WAIT_MS = 8_000L
-
-        /** Re-check interval while waiting for the pending slide to cache. */
-        private const val PREFETCH_POLL_MS = 400L
-
-        /** How long a slide may stay unfetchable before advance() skips past it, so a broken or
-         *  deleted photo can't freeze the frame. Well above [PREFETCH_WAIT_MS]; the photo returns
-         *  on the next cycle. */
-        private const val STUCK_SKIP_MS = 45_000L
 
         /** Debounce window collapsing a burst of index changes (e.g. streamed sync pages that each
          *  insert rows) into a single re-feed, so first-run population doesn't thrash the engine. */

@@ -10,6 +10,8 @@ import com.photoframe.data.source.SourceRepository
 import com.photoframe.settings.QuietHours
 import com.photoframe.settings.ScheduleSettingsRepository
 import com.photoframe.settings.SyncSettingsRepository
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.CancellationException
 import java.time.LocalTime
 
@@ -37,6 +39,9 @@ class SyncManager(
     private val prefetcher: PhotoPrefetcher,
     private val evictor: CacheEvictor,
 ) {
+    private val _completed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val completed = _completed.asSharedFlow()
+
     private val factory = PhotoSourceFactory(sourceRepository, photoDao)
     private val syncer = MetadataSyncer(photoDao, cache)
 
@@ -77,6 +82,8 @@ class SyncManager(
         if (freed > 0) log(null, SyncLogEntity.Level.INFO, "Evicted ${freed / (1024 * 1024)} MB to stay under cap")
         syncLogDao.trimTo(LOG_RETENTION)
 
+        _completed.tryEmit(Unit)
+        prefetcher.kick()
         return SyncSummary(synced, indexed, reindexed, removed)
     }
 

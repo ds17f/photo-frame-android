@@ -31,12 +31,10 @@ class PlaylistEngine(
     private var historyIndex = -1
 
     /**
-     * The next slide, built (its photos already removed from [remaining]) but NOT yet recorded as
-     * shown. Held by [peekPending] so the caller can wait for its photos to be cached before
-     * [commitPending] records it — an uncached upcoming photo is thus never discarded from the
-     * cycle. Null when there is forward history to replay, or nothing has been peeked yet.
+     * Actual scheduled slides, removed from the main bag but not yet shown. Slow downloads
+     * remain here while other ready slides play. Only displayed slides enter history.
      */
-    private var pending: Slide? = null
+    private val upcoming = ArrayDeque<Slide>()
 
     /** Separate without-replacement bag of favorites, drawn from independently of [remaining] so a
      *  favorite can recur more often than once per full cycle (favorites bias). Refilled when empty. */
@@ -90,7 +88,11 @@ class PlaylistEngine(
      */
     fun setPhotos(photos: List<PlaylistPhoto>) {
         val incoming = LinkedHashMap<String, PlaylistPhoto>(photos.size)
-        for (p in photos) incoming[p.id] = p
+        for (p in photos) {
+            val shown = all[p.id]?.lastShownAt
+            incoming[p.id] = if (shown != null && (p.lastShownAt == null || shown > p.lastShownAt))
+                p.copy(lastShownAt = shown) else p
+        }
 
         val addedIds = incoming.keys - all.keys
         val removedIds = all.keys - incoming.keys
@@ -103,7 +105,11 @@ class PlaylistEngine(
 
         // Drop the held pending slide if one of its photos vanished; it'll be rebuilt from the
         // fresh bag on the next peekPending().
-        if (pending?.photos?.any { it.id in removedIds } == true) pending = null
+        if (removedIds.isNotEmpty()) {
+            val survivors = upcoming.flatMap { it.photos }.filter { it.id !in removedIds }
+            upcoming.clear()
+            survivors.forEach { upcoming.addLast(Slide.Single(incoming.getValue(it.id))) }
+        }
 
         // Drop favorites-bag entries that vanished or are no longer favorites; newly-favorited
         // photos are picked up when the bag next refills.
@@ -123,7 +129,7 @@ class PlaylistEngine(
         if (addedIds.isEmpty()) return
         val added = addedIds.map { incoming.getValue(it) }
 
-        if (remaining.isEmpty() && history.isEmpty()) {
+        if (remaining.isEmpty() && upcoming.isEmpty() && all.size == addedIds.size) {
             // Nothing playing yet; the first next() will build the initial cycle.
             return
         }
@@ -141,20 +147,18 @@ class PlaylistEngine(
                 remaining.addAll(sorted)
             }
             OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE -> {
-                // Splice near the front so new photos show up soon (DESIGN §7), but not all
-                // stacked at index 0 when several arrive at once.
-                for (p in added) {
-                    val bound = minOf(SPLICE_FRONT_WINDOW, remaining.size)
-                    val at = if (bound == 0) 0 else random.nextInt(bound + 1)
-                    remaining.add(at, p)
-                }
+                // Batch insertion avoids shifting a 72k bag once per arriving sync row.
+                val prefixSize = minOf(SPLICE_FRONT_WINDOW, remaining.size)
+                val prefix = remaining.take(prefixSize)
+                repeat(prefixSize) { remaining.removeFirst() }
+                remaining.addAll(0, (prefix + added).shuffled(random))
             }
         }
     }
 
     private fun startNewCycle() {
         // A held pending slide was built from the old bag/order; a fresh cycle invalidates it.
-        pending = null
+        upcoming.clear()
         remaining.clear()
         remaining.addAll(
             PhotoOrdering.order(all.values.toList(), orderMode, random, clock(), recencyWindow),
@@ -162,42 +166,73 @@ class PlaylistEngine(
     }
 
     /**
-     * The next [n] photos that playback will consume, without mutating the bag — the prefetcher's
+     * Schedule and return the next [n] photos without recording them as shown — the prefetcher's
      * download horizon. Forward history (slides the user swiped back past, which `next()` replays
      * first) comes ahead of the upcoming bag. Near a cycle boundary this may return fewer than [n]
      * (the next cycle isn't drawn yet); the prefetcher simply fetches what it can see.
      */
     fun peek(n: Int): List<PlaylistPhoto> {
         if (n <= 0) return emptyList()
-        val out = ArrayList<PlaylistPhoto>(n)
-        for (i in historyIndex + 1 until history.size) {
-            for (p in history[i].photos) {
-                out += p
-                if (out.size >= n) return out
-            }
+        fillUpcoming(n)
+        return (history.drop(historyIndex + 1).flatMap { it.photos } +
+            upcoming.flatMap { it.photos }).take(n)
+    }
+
+    /** Build the actual future slides, including favorite draws, so prefetch matches playback. */
+    private fun fillUpcoming(photoCount: Int) {
+        if (all.isEmpty()) return
+        if (remaining.isEmpty() && upcoming.isEmpty()) startNewCycle()
+        var count = upcoming.sumOf { it.photos.size }
+        while (count < photoCount) {
+            // Leave the next cycle until all scheduled slides from this one have been shown.
+            if (remaining.isEmpty() && upcoming.isNotEmpty()) break
+            val slide = if (shouldDrawFavorite()) buildFavoriteSlide() ?: buildMainSlide()
+                else buildMainSlide()
+            if (slide == null) break
+            upcoming.addLast(slide)
+            count += slide.photos.size
         }
-        // The held pending slide comes after any forward history and before the fresh bag — its
-        // photos were removed from `remaining`, so without this the prefetcher would miss the very
-        // next photo it must download.
-        pending?.let {
-            for (p in it.photos) {
-                out += p
-                if (out.size >= n) return out
-            }
+    }
+
+    /** The held window can be consumed out of order when a download is slow or broken. */
+    fun scheduledSlides(): List<Slide> = upcoming.toList()
+
+    /** Confirmed download failures return to the unshown bag, letting the window reach new photos. */
+    fun deferFailed(failedIds: Set<String>) {
+        if (failedIds.isEmpty()) return
+        val failed = upcoming.filter { slide -> slide.photos.any { it.id in failedIds } }
+        if (failed.isEmpty()) return
+        val photos = failed.flatMap { it.photos }.distinctBy { it.id }
+        val ids = photos.map { it.id }.toSet()
+        upcoming.removeAll { it in failed }
+        remaining.removeAll { it.id in ids }
+        remaining.addAll(photos)
+    }
+
+    fun commitScheduled(slide: Slide) {
+        if (!upcoming.remove(slide)) return
+        recordShown(slide)
+    }
+
+    /** Cached startup/offline playback shares history and removes those photos from this cycle. */
+    fun recordCached(slide: Slide) {
+        val ids = slide.photos.map { it.id }.toSet()
+        remaining.removeAll { it.id in ids }
+        val survivors = upcoming.flatMap { it.photos }.filter { it.id !in ids }
+        upcoming.clear()
+        survivors.forEach { upcoming.addLast(Slide.Single(it)) }
+        recordShown(slide)
+    }
+
+    private fun recordShown(slide: Slide) {
+        val now = clock()
+        for (photo in slide.photos) {
+            all[photo.id]?.let { all[photo.id] = it.copy(lastShownAt = now) }
         }
-        // Surface upcoming favorites too when the bias is on, so injected favorites are prefetched
-        // rather than caught uncached when they're drawn.
-        if (favoriteShare > 0.0) {
-            for (p in favoritesBag) {
-                out += p
-                if (out.size >= n) return out
-            }
-        }
-        for (p in remaining) {
-            out += p
-            if (out.size >= n) return out
-        }
-        return out
+        if (historyIndex < history.lastIndex) history.subList(historyIndex + 1, history.size).clear()
+        history.add(slide)
+        historyIndex = history.lastIndex
+        trimHistory()
     }
 
     /** Current slide, or null if nothing has been shown yet. */
@@ -212,10 +247,8 @@ class PlaylistEngine(
      */
     fun peekPending(): Slide? {
         if (historyIndex < history.lastIndex) return history[historyIndex + 1]
-        pending?.let { return it }
-        if (all.isEmpty()) return null
-        pending = if (shouldDrawFavorite()) buildFavoriteSlide() ?: buildMainSlide() else buildMainSlide()
-        return pending
+        fillUpcoming(1)
+        return upcoming.firstOrNull()
     }
 
     /** Draw the next slide from the favorites bag with probability [favoriteShare] (shuffle modes
@@ -245,7 +278,7 @@ class PlaylistEngine(
     }
 
     /**
-     * Record the currently-peeked slide as shown: commit the held [pending] into history, or (when
+     * Record the currently-peeked slide as shown: commit the held [upcoming] into history, or (when
      * replaying) advance into the existing forward history. Call once the peeked slide is actually
      * displayed. No-op if nothing is pending and there is no forward history to advance into.
      */
@@ -257,11 +290,8 @@ class PlaylistEngine(
             historyIndex++
             return
         }
-        val p = pending ?: return
-        history.add(p)
-        historyIndex = history.lastIndex
-        trimHistory()
-        pending = null
+        val p = upcoming.removeFirstOrNull() ?: return
+        recordShown(p)
     }
 
     /** Advance to the next slide and record it as shown (peek + commit in one step). */
@@ -283,7 +313,7 @@ class PlaylistEngine(
         favoritesBag.clear()
         history.clear()
         historyIndex = -1
-        pending = null
+        upcoming.clear()
     }
 
     private fun trimHistory() {

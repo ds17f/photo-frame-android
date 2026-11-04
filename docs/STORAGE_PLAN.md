@@ -266,3 +266,13 @@ amendment, delete dead code (`skippedForBudget`, cap-cutoff loop, old health sta
 - `settings/SyncSettings.kt` (+ new `StorageSettings` + repository)
 - **new** `ui/settings/StorageSettingsScreen.kt`; `SettingsHomeScreen.kt`, `DiagnosticsScreen.kt`
 - `AppContainer.kt` (wiring)
+
+Startup playback now queries small keyset pages of READY rows and checks that the
+local file exists and is nonempty before loading the complete library. The first
+usable cached image appears immediately; it does not consume the engine’s pending
+full-library slide. The full index and normal prefetch horizon initialize alongside
+it. When a fresh cache has no usable files, the first successful prefetch triggers
+the same startup selection rather than waiting for a different shuffled target.
+Missing files are repaired to INDEXED for re-fetch. A fresh installation still needs
+a successful source connection and one downloaded photo; the dashboard has its own
+connection and can work while photo downloads fail.

@@ -50,8 +50,15 @@ class PhotoCache(private val context: Context) {
     /** Copy [input] into the cache and return the written file. */
     fun writeFrom(sourceId: String, remoteId: String, extension: String, input: InputStream): File {
         val dest = fileFor(sourceId, remoteId, extension)
-        dest.outputStream().use { out -> input.copyTo(out) }
-        return dest
+        val staging = File.createTempFile(dest.name, ".part", dest.parentFile)
+        try {
+            staging.outputStream().use { out -> input.copyTo(out) }
+            check(staging.length() > 0) { "Empty photo download" }
+            check(staging.renameTo(dest)) { "Could not commit photo download" }
+            return dest
+        } finally {
+            staging.delete()
+        }
     }
 
     /** Total bytes currently held at the active location. */

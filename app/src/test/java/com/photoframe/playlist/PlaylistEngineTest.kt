@@ -281,4 +281,81 @@ class PlaylistEngineTest {
         // ...and only then shows C.
         assertEquals(c, e.next()!!.id())
     }
+    @Test fun downloadWindow_matchesActualPlayback_includingFavorites() {
+        val e = engine()
+        e.setPhotos(landscapes(1000) + (1..200).map { TestPhotos.favorite("F$it") })
+        e.updateConfig(favoriteShare = 0.2)
+        val horizon = e.peek(64).map { it.id }
+        val played = (1..64).map { e.next()!!.id() }
+        assertEquals(horizon, played)
+        assertTrue("main library must receive prefetch slots", horizon.any { it.startsWith("L") })
+    }
+
+    @Test fun failedHead_doesNotBlockReadySlides_orDropPhotos() {
+        val e = engine()
+        e.setPhotos(landscapes(100))
+        e.peek(64)
+        val blocked = e.peekPending()!!
+        val seen = mutableSetOf<String>()
+        repeat(99) {
+            e.peek(64)
+            val ready = e.scheduledSlides().first { it != blocked }
+            assertTrue("ready photos must not repeat", seen.add(ready.id()))
+            e.commitScheduled(ready)
+            assertEquals("unfetched head must stay queued", blocked, e.peekPending())
+        }
+        e.commitPending()
+        assertTrue(seen.add(blocked.id()))
+        assertEquals(100, seen.size)
+    }
+
+    @Test fun fullLibrary_72k_rotatesWithoutRepeats_afterMetadataReload() {
+        val photos = landscapes(72_000)
+        val e = engine()
+        e.setPhotos(photos)
+        val seen = HashSet<String>()
+        repeat(72_000) { i ->
+            if (i % 64 == 0) e.peek(64)
+            if (i == 1000) e.setPhotos(photos)
+            assertTrue("repeat at position $i", seen.add(e.next()!!.id()))
+        }
+        assertEquals(72_000, seen.size)
+    }
+
+    @Test fun cachedFallback_isRemovedFromFutureCycle_andSupportsBack() {
+        val e = engine()
+        e.setPhotos(landscapes(100))
+        e.peek(64)
+        val first = e.next()!!
+        val fallback = e.scheduledSlides().last()
+        e.recordCached(fallback)
+        assertEquals(first, e.previous())
+        assertEquals(fallback, e.next())
+        val rest = (1..98).map { e.next()!!.id() }
+        assertEquals(98, rest.toSet().size)
+        assertTrue(fallback.id() !in rest)
+        assertTrue(first.id() !in rest)
+    }
+
+    @Test fun emptyBagWithScheduledSlides_doesNotStartAnotherCycle() {
+        val e = engine()
+        e.setPhotos(landscapes(3))
+        assertEquals(3, e.peek(64).size)
+        val last = e.scheduledSlides().last()
+        e.commitScheduled(last)
+        assertEquals(2, e.peek(64).size)
+        assertTrue(last.id() !in e.peek(64).map { it.id })
+    }
+
+    @Test fun entirelyFailedWindow_movesLaterWithoutLosingUnshownPhotos() {
+        val e = engine()
+        e.setPhotos(landscapes(1000))
+        val failed = e.peek(64).map { it.id }.toSet()
+        e.deferFailed(failed)
+        assertTrue(e.peek(64).none { it.id in failed })
+        val cycle = (1..1000).map { e.next()!!.id() }
+        assertEquals(1000, cycle.toSet().size)
+        assertEquals(failed, cycle.takeLast(64).toSet())
+    }
+
 }

@@ -12,6 +12,10 @@ import com.photoframe.data.source.SourceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -53,6 +57,7 @@ class PhotoPrefetcher(
 
     private val stateMutex = Mutex()
     private var horizon: List<PhotoKey> = emptyList()
+    private var visibleKeys: Set<PhotoKey> = emptySet()
     private val inFlight = HashSet<PhotoKey>()
     private val failCount = HashMap<PhotoKey, Int>()
     private val readyAt = HashMap<PhotoKey, Long>()
@@ -83,8 +88,8 @@ class PhotoPrefetcher(
     }
 
     /** Update the upcoming-photo horizon (front = soonest) and wake the loop. */
-    suspend fun setHorizon(keys: List<PhotoKey>) {
-        stateMutex.withLock { horizon = keys }
+    suspend fun setHorizon(keys: List<PhotoKey>, visible: Set<PhotoKey> = emptySet()) {
+        stateMutex.withLock { horizon = keys.distinct(); visibleKeys = visible }
         wake.trySend(Unit)
     }
 
@@ -96,18 +101,25 @@ class PhotoPrefetcher(
         wake.trySend(Unit)
     }
 
+    /** Confirmed failures may be deferred within the unshown playlist cycle. Slow in-flight
+     * downloads are excluded, so ordinary prefetch latency never drops a photo from the window. */
+    suspend fun failedKeys(): Set<String> = stateMutex.withLock {
+        failCount.keys.map { it.key }.toSet()
+    }
+
     /** The set the evictor must not reclaim: horizon photos + in-flight downloads (as string keys). */
     suspend fun protectedKeys(): Set<String> = stateMutex.withLock {
         HashSet<String>(horizon.size + inFlight.size).apply {
             horizon.forEach { add(it.key) }
+            visibleKeys.forEach { add(it.key) }
             inFlight.forEach { add(it.key) }
         }
     }
 
-    private suspend fun runLoop() {
-        while (scope.isActive) {
+    private suspend fun runLoop() = coroutineScope {
+        while (currentCoroutineContext().isActive) {
             val plan = planTick()
-            plan.toFetch.forEach { launchFetch(it) }
+            plan.toFetch.forEach { launchFetch(this, it) }
             withTimeoutOrNull(plan.waitMs) { wake.receive() }
         }
     }
@@ -138,32 +150,37 @@ class PhotoPrefetcher(
         return row.status == PhotoStatus.INDEXED.name
     }
 
-    private fun launchFetch(key: PhotoKey) {
-        scope.launch {
-            val ok = try {
-                fetchOne(key)
+    private fun launchFetch(fetchScope: CoroutineScope, key: PhotoKey) {
+        fetchScope.launch {
+            var ok = false
+            var cancelled = false
+            try {
+                ok = fetchOne(key)
             } catch (e: CancellationException) {
+                cancelled = true
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "prefetch failed for ${key.key}", e)
-                false
-            }
-            stateMutex.withLock {
-                inFlight.remove(key)
-                if (ok) {
-                    failCount.remove(key)
-                    readyAt.remove(key)
-                } else {
-                    val fc = (failCount[key] ?: 0) + 1
-                    failCount[key] = fc
-                    readyAt[key] = clock() + PrefetchPolicy.backoffMillis(fc)
+            } finally {
+                withContext(NonCancellable) {
+                    stateMutex.withLock {
+                        inFlight.remove(key)
+                        if (ok) {
+                            failCount.remove(key)
+                            readyAt.remove(key)
+                        } else if (!cancelled) {
+                            val fc = (failCount[key] ?: 0) + 1
+                            failCount[key] = fc
+                            readyAt[key] = clock() + PrefetchPolicy.backoffMillis(fc)
+                        }
+                    }
                 }
+                wake.trySend(Unit)
             }
             if (ok) {
                 _cached.tryEmit(Unit)
                 maybeMaintainPool()
             }
-            wake.trySend(Unit)
         }
     }
 
@@ -210,6 +227,10 @@ class PhotoPrefetcher(
         // Preview files are EXIF-oriented, so decoded bounds are the true display dims — more
         // reliable for portrait pairing than the source's reported dims (gotcha: orientation).
         val (w, h) = decodeBounds(result.file)
+        if (w == null || h == null) {
+            result.file.delete()
+            return false
+        }
         photoDao.markCached(
             sourceId = key.sourceId,
             remoteId = key.remoteId,

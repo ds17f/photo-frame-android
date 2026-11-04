@@ -41,6 +41,22 @@ interface PhotoDao {
     )
     suspend fun indexPage(afterSourceId: String, afterRemoteId: String, limit: Int): List<PhotoRef>
 
+    /** Small local-only startup pages; showing a cached photo must not load the full library. */
+    @Query(
+        "SELECT * FROM photos WHERE status = 'READY' AND " +
+            "((sourceId > :afterSourceId) OR (sourceId = :afterSourceId AND remoteId > :afterRemoteId)) " +
+            "ORDER BY sourceId, remoteId LIMIT :limit",
+    )
+    suspend fun startupReadyPage(afterSourceId: String, afterRemoteId: String, limit: Int): List<PhotoEntity>
+
+    /** Offline fallback rotates the retained pool least-recently-shown first. */
+    @Query(
+        "SELECT * FROM photos WHERE status = 'READY' " +
+            "AND (sourceId || '/' || remoteId) NOT IN (:excludedKeys) " +
+            "ORDER BY lastShownAt ASC, sourceId, remoteId LIMIT :limit",
+    )
+    suspend fun cachedFallbackPage(excludedKeys: List<String>, limit: Int): List<PhotoEntity>
+
     // ---- Single-row resolution (playback / prefetch) ---------------------------------------
 
     /** Full row for one photo, by primary key — resolves the on-screen slide and prefetch target. */

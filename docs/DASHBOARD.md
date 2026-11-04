@@ -42,9 +42,10 @@ Live configuration is `config/config.json` inside that service directory. It sta
 with the household server's `America/Phoenix` timezone and empty school/event data;
 weather stays disabled until real coordinates are supplied. Chandler Unified's
 2026–27 weekday closures have been imported from the provided district PDF. The configuration
-directory is private deployment data and is ignored by Git. To rebuild/start after
-copying updated server source, run `make photo-frame-dashboard-up` from
-`<services-dir>`. The backend publishes no host port.
+directory is private deployment data and is ignored by Git. To deploy code changes,
+copy the server files (not `config/` or `lunch-calendars/`) to the service directory
+and run `make photo-frame-dashboard-up` from `<services-dir>`. The dashboard README
+lists the other Makefile targets. The backend publishes no host port.
 
 The sample contains fictional children, coordinates, dates, and events. Replace them
 before use. Weather comes from [Open-Meteo](https://open-meteo.com/en/docs). The header

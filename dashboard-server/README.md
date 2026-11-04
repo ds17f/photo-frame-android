@@ -112,11 +112,21 @@ The included Compose definition joins the existing external `caddy_network` and
 publishes no host ports. Caddy terminates HTTPS using the household wildcard
 certificate; Pi-hole resolves the dedicated name to the reverse proxy's LAN IP.
 
-From `<services-dir>`, use `make photo-frame-dashboard-up` to rebuild
-and start, `make photo-frame-dashboard-status` to check health, or
-`make photo-frame-dashboard-logs` for logs. Configuration edits apply without a
-restart; copy new `server.py`, `index.html`, and deployment files from this directory
-and rebuild to apply code changes. The initial live configuration contains no
+The HomeLab Makefile in `<services-dir>` has these targets:
+
+| Target | Action |
+| --- | --- |
+| `make photo-frame-dashboard-up` | Rebuild the image and start the container |
+| `make photo-frame-dashboard-status` | Show the container state and do a health check |
+| `make photo-frame-dashboard-logs` | Follow the logs |
+| `make photo-frame-dashboard-restart` | Restart the container (no rebuild) |
+| `make photo-frame-dashboard-down` | Stop and remove the container |
+
+Configuration edits and new lunch files apply without a restart. To deploy code
+changes, copy the files from this directory to the service directory, then run
+`make photo-frame-dashboard-up`. Do not copy over `config/` or `lunch-calendars/`:
+they hold the live settings and menus. The server code is in the image, so a
+`restart` alone does not apply code changes. The initial live configuration contains no
 example children or weather coordinates. Only the configuration directory is writable;
 the process runs as UID/GID 1000 with a read-only root filesystem. Back up `config/`,
 including its school data and any private calendar subscription URL.

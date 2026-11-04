@@ -27,6 +27,8 @@ object ImmichImport {
         val name: String = "Immich",
         val baseUrl: String,
         val apiKey: String,
+        /** Optional partner key (delete/favorite fallback). Absent = keep whatever is stored. */
+        val partnerApiKey: String? = null,
     )
 
     /** Read + delete the import file if present. Returns null when absent or malformed. */

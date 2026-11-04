@@ -6,6 +6,7 @@ import com.photoframe.data.source.PhotoSource
 import com.photoframe.data.source.SourceRepository
 import com.photoframe.data.db.PhotoDao
 import com.photoframe.data.source.gphotos.GPhotosPickerSource
+import com.photoframe.data.source.immich.ImmichClient
 import com.photoframe.data.source.immich.ImmichSource
 
 /**
@@ -27,7 +28,13 @@ class PhotoSourceFactory(
     private fun createImmich(source: ConfiguredSource): PhotoSource? {
         val config = source.immichConfig ?: return null
         val apiKey = sourceRepository.immichApiKey(source.id) ?: return null
-        return ImmichSource(id = source.id, config = config, apiKey = apiKey)
+        val partnerApiKey = sourceRepository.immichPartnerApiKey(source.id)
+        return ImmichSource(
+            id = source.id,
+            config = config,
+            apiKey = apiKey,
+            partnerApi = partnerApiKey?.let { ImmichClient.create(config.baseUrl, it) },
+        )
     }
 
     private fun createGphotos(source: ConfiguredSource): PhotoSource? {

@@ -69,6 +69,7 @@ fun ImmichSetupScreen(
     onName: (String) -> Unit,
     onUrl: (String) -> Unit,
     onKey: (String) -> Unit,
+    onPartnerKey: (String) -> Unit,
     onTest: () -> Unit,
     onToggleAlbum: (String) -> Unit,
     onTogglePerson: (String) -> Unit,
@@ -122,6 +123,17 @@ fun ImmichSetupScreen(
                 value = state.apiKey,
                 onValueChange = onKey,
                 label = { Text("API key") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.partnerApiKey,
+                onValueChange = onPartnerKey,
+                label = { Text("Partner API key (optional)") },
+                supportingText = {
+                    Text("Used only to delete or favorite photos that your partner owns. Needs asset.delete and asset.update.")
+                },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),

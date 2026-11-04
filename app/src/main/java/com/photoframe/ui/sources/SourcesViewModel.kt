@@ -37,6 +37,8 @@ data class ImmichSetupState(
     val name: String = "",
     val baseUrl: String = "",
     val apiKey: String = "",
+    /** Optional key from the partner's account; delete and favorite fall back to it. Blank = none. */
+    val partnerApiKey: String = "",
     val testing: Boolean = false,
     val connection: SourceHealth? = null,
     val loadingCatalog: Boolean = false,
@@ -130,10 +132,17 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
                     name = existing.displayName,
                     baseUrl = payload.baseUrl,
                     apiKey = payload.apiKey,
+                    partnerApiKey = payload.partnerApiKey
+                        ?: sourceRepository.immichPartnerApiKey(existing.id).orEmpty(),
                     selection = existing.immichConfig?.selection ?: ImmichSelection(),
                 )
             } else {
-                ImmichSetupState(name = payload.name, baseUrl = payload.baseUrl, apiKey = payload.apiKey)
+                ImmichSetupState(
+                    name = payload.name,
+                    baseUrl = payload.baseUrl,
+                    apiKey = payload.apiKey,
+                    partnerApiKey = payload.partnerApiKey.orEmpty(),
+                )
             }
             testAndLoad()
         }
@@ -152,6 +161,7 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
             name = source.displayName,
             baseUrl = config.baseUrl,
             apiKey = sourceRepository.immichApiKey(source.id).orEmpty(),
+            partnerApiKey = sourceRepository.immichPartnerApiKey(source.id).orEmpty(),
             selection = config.selection,
         )
     }
@@ -161,6 +171,7 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
     fun editName(value: String) = _setup.update { it.copy(name = value) }
     fun editBaseUrl(value: String) = _setup.update { it.copy(baseUrl = value, connection = null) }
     fun editApiKey(value: String) = _setup.update { it.copy(apiKey = value, connection = null) }
+    fun editPartnerApiKey(value: String) = _setup.update { it.copy(partnerApiKey = value) }
 
     /** Test the connection; on success, load albums + people for selection. */
     fun testAndLoad() {
@@ -208,13 +219,16 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val config = ImmichConfig(baseUrl = state.baseUrl.trim(), selection = state.selection)
             if (state.editingId == null) {
-                sourceRepository.addImmichSource(state.name.trim(), config, state.apiKey.trim())
+                sourceRepository.addImmichSource(
+                    state.name.trim(), config, state.apiKey.trim(), state.partnerApiKey.trim(),
+                )
             } else {
                 sourceRepository.updateConfig(
                     id = state.editingId,
                     displayName = state.name.trim(),
                     config = config,
                     apiKey = state.apiKey.trim(),
+                    partnerApiKey = state.partnerApiKey.trim(),
                 )
             }
             ensureScheduledAndSyncNow()

@@ -33,8 +33,8 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
 | Purpose | Method + path | Result |
 |---|---|---|
 | Connection + auth test | `GET /api/albums` | ✅ Used for test-connection. NOT `/api/users/me` — that needs the unrelated `user.read` permission (403 without it); `/api/albums` needs only `album.read`, which the app requires anyway. |
-| Delete (trash) | `DELETE /api/assets` `{ids,force:false}` | needs `asset.delete`. Long-press → delete. |
-| Favorite | `PUT /api/assets` `{ids,isFavorite:true}` | needs `asset.update`. Long-press → add to favorites. |
+| Delete (trash) | `DELETE /api/assets` `{ids,force:false}` | needs `asset.delete`. Long-press → delete. Only the owner can delete an asset: a partner-shared photo fails with the main key (seen as 404). If the source has a partner API key, the app tries it next and shows an error only when both keys fail. |
+| Favorite | `PUT /api/assets` `{ids,isFavorite:true}` | needs `asset.update`. Long-press → add to favorites. Owner-only, like delete: falls back to the partner API key when the main key fails. |
 | Hide from frame | `POST /api/albums` `{albumName}` (create) + `PUT /api/albums/{id}/assets` `{ids}` (add) | needs `album.create` + `albumAsset.create`. Long-press → hide. Blacklist album convention below. |
 | List albums | `GET /api/albums` | ✅ summaries (`id`, `albumName`, `assetCount`). |
 | Recognized people | `GET /api/people?withHidden&page&size` | ✅ `{people:[{id,name,thumbnailPath}], total, hasNextPage}`. **Pages at 500.** |

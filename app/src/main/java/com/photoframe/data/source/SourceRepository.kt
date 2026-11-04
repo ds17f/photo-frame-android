@@ -35,9 +35,11 @@ class SourceRepository(
         displayName: String,
         config: ImmichConfig,
         apiKey: String,
+        partnerApiKey: String? = null,
     ): String {
         val id = "immich-" + UUID.randomUUID().toString().take(8)
         secrets.setImmichApiKey(id, apiKey)
+        secrets.setImmichPartnerApiKey(id, partnerApiKey)
         sourceDao.upsert(
             SourceEntity(
                 id = id,
@@ -84,15 +86,22 @@ class SourceRepository(
         return id
     }
 
-    /** Replace an existing source's non-secret config; optionally rotate its API key. */
+    /**
+     * Replace an existing source's non-secret config; optionally rotate its API key. For
+     * [partnerApiKey], null keeps the stored value and blank clears it.
+     */
     suspend fun updateConfig(
         id: String,
         displayName: String? = null,
         config: SourceConfig? = null,
         apiKey: String? = null,
+        partnerApiKey: String? = null,
     ) {
         val existing = sourceDao.byId(id) ?: return
         if (apiKey != null && config is ImmichConfig) secrets.setImmichApiKey(id, apiKey)
+        if (partnerApiKey != null && config is ImmichConfig) {
+            secrets.setImmichPartnerApiKey(id, partnerApiKey)
+        }
         sourceDao.upsert(
             existing.copy(
                 displayName = displayName ?: existing.displayName,
@@ -124,6 +133,7 @@ class SourceRepository(
     }
 
     fun immichApiKey(sourceId: String): String? = secrets.getImmichApiKey(sourceId)
+    fun immichPartnerApiKey(sourceId: String): String? = secrets.getImmichPartnerApiKey(sourceId)
 
     fun gphotosRefreshToken(sourceId: String): String? = secrets.getGphotosRefreshToken(sourceId)
     fun gphotosClientSecret(sourceId: String): String? = secrets.getGphotosClientSecret(sourceId)

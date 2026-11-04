@@ -33,6 +33,20 @@ class EncryptedSecrets(context: Context) {
         prefs.edit().putString(immichApiKeyName(sourceId), apiKey).apply()
     }
 
+    /**
+     * Optional second Immich key, from the partner's account. Delete and favorite fall back to it
+     * when the main key cannot change a photo that the partner owns. Blank clears it.
+     */
+    fun getImmichPartnerApiKey(sourceId: String): String? =
+        prefs.getString(immichPartnerApiKeyName(sourceId), null)?.takeIf { it.isNotBlank() }
+
+    fun setImmichPartnerApiKey(sourceId: String, apiKey: String?) {
+        val edit = prefs.edit()
+        if (apiKey.isNullOrBlank()) edit.remove(immichPartnerApiKeyName(sourceId))
+        else edit.putString(immichPartnerApiKeyName(sourceId), apiKey)
+        edit.apply()
+    }
+
     // ---- Google Photos Picker (OAuth) -------------------------------------------------------
     // Desktop-type client: the "secret" is non-confidential (shipped in installed apps) but we
     // still keep it out of the plaintext config JSON. The refresh token is a real secret (§12).
@@ -55,12 +69,14 @@ class EncryptedSecrets(context: Context) {
     fun clearForSource(sourceId: String) {
         prefs.edit()
             .remove(immichApiKeyName(sourceId))
+            .remove(immichPartnerApiKeyName(sourceId))
             .remove(gphotosRefreshTokenName(sourceId))
             .remove(gphotosClientSecretName(sourceId))
             .apply()
     }
 
     private fun immichApiKeyName(sourceId: String) = "immich_api_key.$sourceId"
+    private fun immichPartnerApiKeyName(sourceId: String) = "immich_partner_api_key.$sourceId"
     private fun gphotosRefreshTokenName(sourceId: String) = "gphotos_refresh_token.$sourceId"
     private fun gphotosClientSecretName(sourceId: String) = "gphotos_client_secret.$sourceId"
 

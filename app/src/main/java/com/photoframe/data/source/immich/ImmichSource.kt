@@ -8,6 +8,7 @@ import com.photoframe.data.source.Sink
 import com.photoframe.data.source.SourceHealth
 import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
+import retrofit2.Response
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -24,6 +25,8 @@ class ImmichSource(
     private val config: ImmichConfig,
     apiKey: String,
     private val api: ImmichApi = ImmichClient.create(config.baseUrl, apiKey),
+    /** Client for the optional partner key. Used only as a delete/favorite fallback. */
+    private val partnerApi: ImmichApi? = null,
 ) : PhotoSource {
 
     override val type: SourceType get() = SourceType.IMMICH
@@ -93,24 +96,55 @@ class ImmichSource(
 
     override val canDelete: Boolean get() = true
 
-    /** Move the asset to the Immich trash (recoverable). Throws with a clear message on failure. */
-    override suspend fun deleteRemote(remoteId: String) {
-        val response = api.deleteAssets(ImmichDeleteDto(ids = listOf(remoteId), force = false))
-        if (!response.isSuccessful) {
-            val hint = if (response.code() == 403) " — API key needs the asset.delete permission" else ""
-            error("Delete failed (HTTP ${response.code()})$hint")
+    /**
+     * Move the asset to the Immich trash (recoverable). Only the owner can delete an asset, so
+     * this falls back to the partner key (see [withPartnerFallback]).
+     */
+    override suspend fun deleteRemote(remoteId: String) =
+        withPartnerFallback("Delete", "asset.delete") {
+            it.deleteAssets(ImmichDeleteDto(ids = listOf(remoteId), force = false))
         }
-    }
 
     override val canFavorite: Boolean get() = true
 
-    /** Mark the asset as a favorite in Immich. Throws with a clear message on failure. */
-    override suspend fun favoriteRemote(remoteId: String) {
-        val response = api.updateAssets(ImmichUpdateDto(ids = listOf(remoteId), isFavorite = true))
-        if (!response.isSuccessful) {
-            val hint = if (response.code() == 403) " — API key needs the asset.update permission" else ""
-            error("Favorite failed (HTTP ${response.code()})$hint")
+    /**
+     * Mark the asset as a favorite in Immich. Only the owner can update an asset, so this falls
+     * back to the partner key (see [withPartnerFallback]).
+     */
+    override suspend fun favoriteRemote(remoteId: String) =
+        withPartnerFallback("Favorite", "asset.update") {
+            it.updateAssets(ImmichUpdateDto(ids = listOf(remoteId), isFavorite = true))
         }
+
+    /**
+     * Run an owner-only call with the main key. If it fails and a partner key is set, run it
+     * again with the partner key: a partner-shared photo fails with the main key (404/400).
+     * Throws with a clear message only when every key fails.
+     */
+    private suspend fun withPartnerFallback(
+        action: String,
+        permission: String,
+        call: suspend (ImmichApi) -> Response<Unit>,
+    ) {
+        val primary = call(api)
+        if (primary.isSuccessful) return
+        val partnerApi = partnerApi
+        if (partnerApi == null) {
+            val hint = if (primary.code() == 403) " — API key needs the $permission permission" else ""
+            error("$action failed (HTTP ${primary.code()})$hint")
+        }
+        val partner = try {
+            call(partnerApi)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error("$action failed (HTTP ${primary.code()}; partner key: ${e.message})")
+        }
+        if (partner.isSuccessful) return
+        val hint = if (403 in setOf(primary.code(), partner.code())) {
+            " — both keys need the $permission permission"
+        } else ""
+        error("$action failed (HTTP ${primary.code()}; partner key HTTP ${partner.code()})$hint")
     }
 
     override val canHide: Boolean get() = true

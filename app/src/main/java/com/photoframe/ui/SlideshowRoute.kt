@@ -177,6 +177,7 @@ fun SlideshowRoute(onExit: () -> Unit) {
             onName = sourcesVm::editName,
             onUrl = sourcesVm::editBaseUrl,
             onKey = sourcesVm::editApiKey,
+            onPartnerKey = sourcesVm::editPartnerApiKey,
             onTest = sourcesVm::testAndLoad,
             onToggleAlbum = sourcesVm::toggleAlbum,
             onTogglePerson = sourcesVm::togglePerson,

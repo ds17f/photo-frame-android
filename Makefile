@@ -107,7 +107,11 @@ immich-config: ## Push Immich URL+key from .env to the device (no typing). PKG=c
 	 test -n "$$IMMICH_API_KEY" || { echo "IMMICH_API_KEY is empty in .env"; exit 1; }; \
 	 pkg="$${PKG:-$(PKG_DEBUG)}"; \
 	 url="$${IMMICH_BASE_URL:-https://immich.example.com}"; \
-	 printf '{"name":"Immich","baseUrl":"%s","apiKey":"%s"}' "$$url" "$$IMMICH_API_KEY" > /tmp/immich_import.json; \
+	 if [ -n "$$IMMICH_PARTNER_API_KEY" ]; then \
+	   printf '{"name":"Immich","baseUrl":"%s","apiKey":"%s","partnerApiKey":"%s"}' "$$url" "$$IMMICH_API_KEY" "$$IMMICH_PARTNER_API_KEY" > /tmp/immich_import.json; \
+	 else \
+	   printf '{"name":"Immich","baseUrl":"%s","apiKey":"%s"}' "$$url" "$$IMMICH_API_KEY" > /tmp/immich_import.json; \
+	 fi; \
 	 $(ADB) shell mkdir -p /sdcard/Android/data/$$pkg/files; \
 	 $(ADB) push /tmp/immich_import.json /sdcard/Android/data/$$pkg/files/immich_import.json >/dev/null; \
 	 rm -f /tmp/immich_import.json; \

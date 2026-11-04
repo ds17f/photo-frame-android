@@ -35,8 +35,9 @@ data class DisplaySettings(
     val transitionSeconds: Float = 1.0f,
     val kenBurnsEnabled: Boolean = true,
     val portraitMode: PortraitMode = PortraitMode.AUTO,
-    val orderMode: OrderMode = OrderMode.SHUFFLE,
-    val recencyWindowDays: Int = 7,
+    val orderMode: OrderMode = OrderMode.RECENCY_BOOSTED_SHUFFLE,
+    /** Half-life (days) of the newer-photo boost in RECENCY_BOOSTED_SHUFFLE, by capture date. */
+    val recencyWindowDays: Int = 360,
     /** Roughly what share (%) of shown slides should be favorites (shuffle modes). 0 = no bias,
      *  100 = favorites only. Achieved by drawing each slide from favorites with this probability. */
     val favoriteSharePercent: Int = 0,
@@ -55,7 +56,7 @@ data class DisplaySettings(
     companion object {
         val INTERVAL_RANGE = 5..3600           // 5 s – 1 h (DESIGN §7)
         val TRANSITION_SECONDS_RANGE = 0.5f..3.0f
-        val RECENCY_WINDOW_DAYS_RANGE = 1..90
+        val RECENCY_WINDOW_DAYS_RANGE = 30..1830
         val FAVORITE_SHARE_PERCENT_RANGE = 0..100
         val DASHBOARD_DIM_PERCENT_RANGE = 0..90
     }

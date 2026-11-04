@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [PhotoEntity::class, SourceEntity::class, SyncLogEntity::class],
-    version = 5,
+    entities = [PhotoEntity::class, SourceEntity::class, SyncLogEntity::class, ShownHistoryEntity::class],
+    version = 6,
     // Schema export is deferred until the network sources stabilize the schema and real
     // migrations begin; a personal sideloaded app can fall back to destructive migration in
     // the meantime (the cache re-syncs from the source on first run after an upgrade).
@@ -75,6 +75,24 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 → v6: add `shown_history`, the show-history table that sync never deletes from.
+         * Backfilled from the current `photos.lastShownAt`, so nothing already shown is forgotten.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `shown_history` (`sourceId` TEXT NOT NULL, " +
+                        "`remoteId` TEXT NOT NULL, `lastShownAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`sourceId`, `remoteId`))",
+                )
+                db.execSQL(
+                    "INSERT OR REPLACE INTO `shown_history` (sourceId, remoteId, lastShownAt) " +
+                        "SELECT sourceId, remoteId, lastShownAt FROM `photos` WHERE lastShownAt IS NOT NULL",
+                )
+            }
+        }
+
         fun get(context: Context): PhotoFrameDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -82,7 +100,7 @@ abstract class PhotoFrameDatabase : RoomDatabase() {
                     PhotoFrameDatabase::class.java,
                     "photoframe.db",
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration() // backstop for any other version gap
                     .build()
                     .also { instance = it }

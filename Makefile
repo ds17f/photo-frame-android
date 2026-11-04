@@ -69,6 +69,10 @@ logcat: ## Tail app logs (playback + sync/cache tags)
 		CacheEvictor:V CacheMaintainer:V PhotoCache:V ImmichImport:V FixtureImporter:V \
 		GPhotosPickerSession:V CrashRestartHandler:V AndroidRuntime:E '*:S'
 
+.PHONY: playback-report
+playback-report: ## Randomness report from the device: repeats, years shown vs library (HOURS=24)
+	scripts/playback-report.sh $(or $(HOURS),24) $(PKG_DEBUG)
+
 ## ---- Install / run (release) ---------------------------------------------------------
 
 .PHONY: install-release

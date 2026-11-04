@@ -201,12 +201,21 @@ matters.
 
 ## 7. Playlist engine
 
-- **Order modes:** Shuffle (default), Chronological, Newest-first, and **Recency-boosted
-  shuffle** — photos added in the last N days (default 7) get ~3× draw weight, so new
-  photos show up promptly without dominating.
-- **Shuffle bag:** random-without-replacement across the merged photo set of all
-  enabled sources; reshuffle when exhausted. Newly synced photos are spliced into the
-  current bag near the front (that's the "new photo appears soon" moment).
+- **Order modes:** **Recency-boosted shuffle** (default), Shuffle, Chronological,
+  Newest-first. Recency-boosted shuffle gives each photo a draw weight from its capture
+  date: `1 + 2 × 0.5^(age / half-life)`. A photo taken today has weight 3. A photo that is
+  one half-life old (default 360 days) has weight 2. Old and undated photos have weight 1.
+- **Shuffle bag:** never-shown photos come first, as a weighted random order. Shown photos
+  come after them, oldest show day first and random within each day. The bag is a pure
+  function of the photo set and the persisted show history. Thus when a sync changes the
+  photo set, the engine builds the bag again from the start, and does not merge into the
+  old bag. Slides that are already scheduled (and downloading) keep their place.
+- **New photos:** only a new photo taken in the last 7 days goes near the front of the
+  bag (that is the "new photo appears soon" moment). Other additions (later pages of
+  the first sync, rows that the server listing dropped and then lists again) join the
+  rebuilt shuffle at random positions.
+- **Show history:** `shown_history` keeps the last-shown time of each photo. Sync never
+  deletes from it. When sync inserts a row again, the row gets its last-shown time back.
 - **Interval:** per-photo display duration, default 30 s (range 5 s–1 h).
 - **Portrait handling** (`auto` default / `pair` / `blur-fill` setting):
   - `auto`: when the next photo is portrait, look ahead up to K=10 items in the bag for

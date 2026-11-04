@@ -64,10 +64,50 @@ class PlaylistEngineTest {
         val e = engine()
         e.setPhotos(landscapes(20))
         e.next() // start a cycle so splicing (not initial build) happens
-        e.setPhotos(landscapes(20) + landscape("NEW"))
+        // Taken yesterday relative to the engine clock (2024-06-01) — a genuinely new photo.
+        val fresh = TestPhotos.photo("NEW", takenAt = Instant.parse("2024-05-31T00:00:00Z"))
+        e.setPhotos(landscapes(20) + fresh)
         // NEW should appear within the next SPLICE_FRONT_WINDOW+1 draws
         val upcoming = (1..(PlaylistEngine.SPLICE_FRONT_WINDOW + 1)).map { e.next()!!.id() }
         assertTrue("NEW should appear soon, saw $upcoming", upcoming.contains("NEW"))
+    }
+
+    @Test fun reAddedOldPhoto_isNotFrontSpliced() {
+        // Immich pagination churn re-lists old photos as "new" rows; they must not jump the queue.
+        val hits = (1L..50L).count { seed ->
+            val e = engine(seed)
+            e.setPhotos(landscapes(200))
+            e.next()
+            val old = TestPhotos.photo("OLD", takenAt = Instant.parse("1979-05-17T00:00:00Z"))
+            e.setPhotos(landscapes(200) + old)
+            (1..(PlaylistEngine.SPLICE_FRONT_WINDOW + 1)).any { e.next()!!.id() == "OLD" }
+        }
+        assertTrue("old re-add hit the front in $hits/50 runs", hits <= 5)
+    }
+
+    @Test fun largeLateBatch_isScatteredThroughBag_notPlayedAsABlock() {
+        // First sync streams pages: the engine starts on page 1, later pages arrive as additions.
+        val e = engine()
+        val page1 = (1..100).map { landscape("A$it") }
+        val page2 = (1..100).map { landscape("B$it") }
+        e.setPhotos(page1)
+        e.next()
+        e.setPhotos(page1 + page2)
+        val next50 = (1..50).map { e.next()!!.id() }
+        val fromB = next50.count { it.startsWith("B") }
+        assertTrue("expected a mix of both pages, got $fromB/50 from page 2", fromB in 10..40)
+    }
+
+    @Test fun rebuildAfterSync_keepsScheduledSlides_andDoesNotReplayShownPhotos() {
+        val e = engine()
+        e.setPhotos(landscapes(50))
+        val shown = (1..10).map { e.next()!!.id() }.toSet()
+        val scheduled = e.peek(5).map { it.id }
+        e.setPhotos(landscapes(50) + (1..20).map { landscape("N$it") }) // a sync adds 20 old photos
+        assertEquals("already-scheduled downloads keep their place", scheduled, e.peek(5).map { it.id })
+        val rest = (1..60).map { e.next()!!.id() }
+        assertTrue("shown photos must not return before the unseen 60 are done", rest.none { it in shown })
+        assertEquals(60, rest.toSet().size)
     }
 
     @Test fun removedPhoto_isDroppedFromUpcomingBag() {

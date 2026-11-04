@@ -15,8 +15,11 @@ import kotlin.random.Random
  */
 object PhotoOrdering {
 
-    /** Recent photos get ~this much extra draw weight in RECENCY_BOOSTED_SHUFFLE. */
+    /** A photo taken today gets this much draw weight in RECENCY_BOOSTED_SHUFFLE; an undated or
+     *  very old photo gets 1. The boost halves every recency window (smooth, no cliff). */
     const val RECENCY_BOOST = 3.0
+
+    private const val MILLIS_PER_DAY = 86_400_000L
 
     fun order(
         photos: List<PlaylistPhoto>,
@@ -27,24 +30,54 @@ object PhotoOrdering {
     ): List<PlaylistPhoto> {
         if (photos.size <= 1) return photos.toList()
         return when (mode) {
-            // Shuffle, then sink recently-shown photos to the back: never-shown come first (in
-            // random order — the stable sort preserves the shuffle among equal/null keys), then the
-            // rest least-recently-shown first. Because lastShownAt is persisted, a restart rebuilds
-            // the cycle roaming the un-shown remainder instead of replaying what was just on screen —
-            // no repeats until the whole library has cycled.
-            OrderMode.SHUFFLE ->
-                photos.shuffled(random).sortedWith(compareBy(nullsFirst(naturalOrder())) { it.lastShownAt })
+            OrderMode.SHUFFLE -> shuffleByShowHistory(photos, random) { 1.0 }
+            OrderMode.RECENCY_BOOSTED_SHUFFLE ->
+                shuffleByShowHistory(photos, random) { p -> recencyWeight(p, now, recencyWindow) }
             OrderMode.CHRONOLOGICAL -> photos.sortedWith(byTakenAt(ascending = true))
             OrderMode.NEWEST_FIRST -> photos.sortedWith(byTakenAt(ascending = false))
-            OrderMode.RECENCY_BOOSTED_SHUFFLE ->
-                weightedShuffle(photos, random) { p ->
-                    if (isRecent(p, now, recencyWindow)) RECENCY_BOOST else 1.0
-                }.sortedBy { it.lastShownAt != null }
         }
     }
 
-    fun isRecent(photo: PlaylistPhoto, now: Instant, window: Duration): Boolean =
-        !photo.addedAt.isBefore(now.minus(window))
+    /**
+     * Draw weight by capture date: `1 + (BOOST-1) * 0.5^(age / halfLife)`. A photo taken today
+     * weighs ~3, one taken a half-life ago ~2, an old or undated one ~1 — newer photos come up
+     * more often without old ones going quiet.
+     */
+    fun recencyWeight(photo: PlaylistPhoto, now: Instant, halfLife: Duration): Double {
+        val taken = photo.takenAt ?: return 1.0
+        val halfLifeDays = (halfLife.toMillis().toDouble() / MILLIS_PER_DAY).coerceAtLeast(1.0)
+        val ageDays = ((now.toEpochMilli() - taken.toEpochMilli()).toDouble() / MILLIS_PER_DAY).coerceAtLeast(0.0)
+        return 1.0 + (RECENCY_BOOST - 1.0) * Math.pow(0.5, ageDays / halfLifeDays)
+    }
+
+    /**
+     * The shuffle order, rebuilt from scratch whenever the photo set changes:
+     * 1. Never-shown photos first, as a (weighted) random permutation.
+     * 2. Then shown photos, oldest show day first; random within each day so cycle 2 isn't a
+     *    replay of cycle 1's exact sequence.
+     * Because lastShownAt is persisted (and survives a row being deleted and re-listed), this is
+     * stateless: every rebuild — after a sync, a restart, or a reinstall that keeps the database —
+     * keeps roaming what hasn't been shown yet.
+     */
+    private fun shuffleByShowHistory(
+        photos: List<PlaylistPhoto>,
+        random: Random,
+        weight: (PlaylistPhoto) -> Double,
+    ): List<PlaylistPhoto> {
+        val keyed = photos.map { p -> Keyed(p, showDay(p), weightedKey(random, weight(p))) }
+        return keyed.sortedWith(compareBy<Keyed> { it.day }.thenByDescending { it.key }).map { it.photo }
+    }
+
+    private class Keyed(val photo: PlaylistPhoto, val day: Long, val key: Double)
+
+    private fun showDay(p: PlaylistPhoto): Long =
+        p.lastShownAt?.let { Math.floorDiv(it.toEpochMilli(), MILLIS_PER_DAY) } ?: Long.MIN_VALUE
+
+    /** Efraimidis–Spirakis key `u^(1/w)` in log space; sort descending. Higher weight ⇒ earlier. */
+    private fun weightedKey(random: Random, weight: Double): Double {
+        val u = random.nextDouble().coerceIn(1e-12, 1.0)
+        return ln(u) / weight.coerceAtLeast(1e-9)
+    }
 
     /** Undated photos sort to the end in both directions. */
     private fun byTakenAt(ascending: Boolean): Comparator<PlaylistPhoto> {
@@ -71,23 +104,4 @@ object PhotoOrdering {
             }
         }
     }
-
-    /**
-     * Weighted random permutation via the Efraimidis–Spirakis method: each item gets a key
-     * `u^(1/w)` and we sort by descending key. Higher weight ⇒ tends to sort earlier, so a
-     * 3× weighted photo appears ~3× as often near the front across reshuffles — exactly the
-     * "new photos show up promptly without dominating" behaviour (DESIGN §7).
-     */
-    private fun weightedShuffle(
-        photos: List<PlaylistPhoto>,
-        random: Random,
-        weight: (PlaylistPhoto) -> Double,
-    ): List<PlaylistPhoto> =
-        photos.map { p ->
-            val w = weight(p).coerceAtLeast(1e-9)
-            // key = u^(1/w); compute in log space to stay numerically stable.
-            val u = random.nextDouble().coerceIn(1e-12, 1.0)
-            val key = ln(u) / w // larger (closer to 0) key = earlier; sort descending
-            p to key
-        }.sortedByDescending { it.second }.map { it.first }
 }

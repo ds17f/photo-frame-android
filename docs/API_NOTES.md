@@ -64,6 +64,10 @@ paths centralized in `data/source/immich/ImmichApi.kt`.
   and the total pinned at ~71,200 (verified in the on-device `sync_log`: e.g. `+89/−82`, `+98/−85`, …).
   A skipped asset was mirror-deleted then re-added next pass — and `PlaylistEngine.spliceIn` front-splices
   re-adds, so the *same* ~80 photos resurfaced every ~30–60 min ("same photos repeating").
+  **2026-11-04:** the worst case is a tie group. 529 scans share one timestamp (1979-05-17), and they
+  churned every sync. They were 0.7% of the library but 45% of the slides. Now the engine rebuilds the
+  shuffle on each change (no front-splice for old photos), and `shown_history` keeps the last-shown time
+  through a delete and re-add. The churn continues, but it has no effect on playback.
   **Mitigation (not a server fix):** mirror deletion is now **debounced** — a photo must be absent from
   `DELETE_MISS_STREAK` (3) consecutive full syncs before it's removed (`photos.missStreak`,
   `MetadataSyncer`). Flicker recovers on the next pass and never crosses the threshold; a genuine

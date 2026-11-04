@@ -52,10 +52,10 @@ class PhotoOrderingTest {
     }
 
     @Test fun recencyBoosted_placesRecentPhotosEarlierOnAverage() {
-        // 10 recent (added today) + 10 old (added long ago). Over many shuffles, recent
-        // photos should average a lower (earlier) position than old ones.
-        val recent = (1..10).map { landscape("R$it", addedAt = now) }
-        val old = (1..10).map { landscape("O$it", addedAt = now.minus(Duration.ofDays(60))) }
+        // 10 taken today + 10 taken years ago (all synced at the same moment — the boost must key
+        // on capture date, not sync date). Recent photos should average an earlier position.
+        val recent = (1..10).map { TestPhotos.photo("R$it", takenAt = now, addedAt = now) }
+        val old = (1..10).map { TestPhotos.photo("O$it", takenAt = now.minus(Duration.ofDays(3650)), addedAt = now) }
         val all = recent + old
 
         var recentPos = 0.0
@@ -85,4 +85,24 @@ class PhotoOrderingTest {
         }
     }
 
+    @Test fun recencyWeight_decaysSmoothlyByCaptureDate() {
+        val halfLife = Duration.ofDays(360)
+        fun w(daysAgo: Long) = PhotoOrdering.recencyWeight(
+            TestPhotos.photo("x", takenAt = now.minus(Duration.ofDays(daysAgo))), now, halfLife,
+        )
+        assertEquals(3.0, w(0), 1e-9)
+        assertEquals(2.0, w(360), 1e-9)
+        assertTrue(w(3600) < 1.01)
+        assertEquals(1.0, PhotoOrdering.recencyWeight(TestPhotos.photo("u"), now, halfLife), 1e-9)
+    }
+
+    @Test fun shuffleModes_orderShownPhotosByShowDay_oldestDayFirst() {
+        for (mode in listOf(OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE)) {
+            val day1 = landscapes(30).map { it.copy(id = "d1-${it.id}", lastShownAt = now.minus(Duration.ofDays(2))) }
+            val day2 = landscapes(30).map { it.copy(id = "d2-${it.id}", lastShownAt = now.minus(Duration.ofDays(1))) }
+            val unseen = landscapes(30).map { it.copy(id = "u-${it.id}") }
+            val result = order(day2 + unseen + day1, mode).map { it.id.substringBefore('-') }
+            assertEquals(List(30) { "u" } + List(30) { "d1" } + List(30) { "d2" }, result)
+        }
+    }
 }

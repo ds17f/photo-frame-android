@@ -56,7 +56,8 @@ class DisplaySettingsRepository(private val context: Context) {
             kenBurnsEnabled = this[Keys.KEN_BURNS] ?: d.kenBurnsEnabled,
             portraitMode = enumOr(this[Keys.PORTRAIT_MODE], d.portraitMode),
             orderMode = enumOr(this[Keys.ORDER_MODE], d.orderMode),
-            recencyWindowDays = this[Keys.RECENCY_DAYS] ?: d.recencyWindowDays,
+            recencyWindowDays = (this[Keys.RECENCY_DAYS] ?: d.recencyWindowDays)
+                .coerceIn(DisplaySettings.RECENCY_WINDOW_DAYS_RANGE),
             favoriteSharePercent = this[Keys.FAVORITE_SHARE] ?: d.favoriteSharePercent,
             clockEnabled = this[Keys.CLOCK_ENABLED] ?: d.clockEnabled,
             clockCorner = enumOr(this[Keys.CLOCK_CORNER], d.clockCorner),

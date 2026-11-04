@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -195,7 +196,38 @@ interface PhotoDao {
     // ---- Show history + deletion -----------------------------------------------------------
 
     @Query("UPDATE photos SET lastShownAt = :shownAt WHERE sourceId = :sourceId AND remoteId = :remoteId")
-    suspend fun markShown(sourceId: String, remoteId: String, shownAt: Long)
+    suspend fun updateLastShown(sourceId: String, remoteId: String, shownAt: Long)
+
+    @Query(
+        "INSERT OR REPLACE INTO shown_history (sourceId, remoteId, lastShownAt) " +
+            "VALUES (:sourceId, :remoteId, :shownAt)",
+    )
+    suspend fun recordShownHistory(sourceId: String, remoteId: String, shownAt: Long)
+
+    /** Record a show on the index row AND in [ShownHistoryEntity], which outlives row deletion. */
+    @Transaction
+    suspend fun markShown(sourceId: String, remoteId: String, shownAt: Long) {
+        updateLastShown(sourceId, remoteId, shownAt)
+        recordShownHistory(sourceId, remoteId, shownAt)
+    }
+
+    /** Give rows that have no show history (typically just re-inserted by sync) their remembered
+     *  `lastShownAt` back. Correlated subquery, not UPDATE…FROM: Fire TV's SQLite predates it. */
+    @Query(
+        "UPDATE photos SET lastShownAt = (SELECT h.lastShownAt FROM shown_history h " +
+            "WHERE h.sourceId = photos.sourceId AND h.remoteId = photos.remoteId) " +
+            "WHERE lastShownAt IS NULL AND EXISTS (SELECT 1 FROM shown_history h " +
+            "WHERE h.sourceId = photos.sourceId AND h.remoteId = photos.remoteId)",
+    )
+    suspend fun restoreShownHistory()
+
+    /** [insertNew] + [restoreShownHistory] atomically, so the playlist feed never sees a re-listed
+     *  photo as "never shown" in between. */
+    @Transaction
+    suspend fun insertNewRestoringHistory(photos: List<PhotoEntity>) {
+        insertNew(photos)
+        restoreShownHistory()
+    }
 
     @Query("DELETE FROM photos WHERE sourceId = :sourceId AND remoteId IN (:remoteIds)")
     suspend fun deleteFromSource(sourceId: String, remoteIds: List<String>)

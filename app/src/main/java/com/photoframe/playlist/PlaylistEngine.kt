@@ -15,7 +15,8 @@ import kotlin.random.Random
  * - Produces [Slide]s (single photos or portrait pairs) on demand via [next]/[previous].
  * - Shuffle modes draw random-without-replacement from a "bag"; when the bag empties a new
  *   cycle is drawn. Recency-boosted shuffle weights recently-added photos ~3×.
- * - Newly-synced photos are spliced near the front of the current bag so they appear soon.
+ * - When the photo set changes, the shuffle bag is rebuilt from scratch (never-shown first, by
+ *   persisted show history); only freshly-taken new photos are placed near the front.
  * - Keeps a bounded history so back-swipes revisit the actual previously-shown slides.
  *
  * All randomness and time flow through injected [random]/[clock] so the engine is fully
@@ -146,14 +147,36 @@ class PlaylistEngine(
                 remaining.clear()
                 remaining.addAll(sorted)
             }
-            OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE -> {
-                // Batch insertion avoids shifting a 72k bag once per arriving sync row.
-                val prefixSize = minOf(SPLICE_FRONT_WINDOW, remaining.size)
-                val prefix = remaining.take(prefixSize)
-                repeat(prefixSize) { remaining.removeFirst() }
-                remaining.addAll(0, (prefix + added).shuffled(random))
-            }
+            OrderMode.SHUFFLE, OrderMode.RECENCY_BOOSTED_SHUFFLE -> rebuildShuffle(added)
         }
+    }
+
+    /**
+     * Rebuild the whole shuffle bag from [all] instead of merging into the old one. The order is a
+     * pure function of the photo set + persisted show history (see [PhotoOrdering]), so a rebuild
+     * loses nothing — and it removes every way a merge could skew playback (sync pages arriving as
+     * blocks, churned rows jumping the queue). Slides already scheduled in [upcoming] (and being
+     * downloaded) stay put. Photos taken within [FRESH_PHOTO_WINDOW] that just arrived go near the
+     * front so a new upload shows up soon.
+     */
+    private fun rebuildShuffle(added: List<PlaylistPhoto>) {
+        val now = clock()
+        val cutoff = now.minus(FRESH_PHOTO_WINDOW)
+        val freshIds = added
+            .filter { p -> p.lastShownAt == null && p.takenAt?.let { !it.isBefore(cutoff) } == true }
+            .map { it.id }
+            .toSet()
+        val scheduled = upcoming.flatMap { it.photos }.map { it.id }.toSet()
+        val pool = all.values.filter { it.id !in scheduled && it.id !in freshIds }
+        val ordered = PhotoOrdering.order(pool, orderMode, random, now, recencyWindow)
+        remaining.clear()
+        if (freshIds.isEmpty()) {
+            remaining.addAll(ordered)
+            return
+        }
+        val prefixSize = minOf(SPLICE_FRONT_WINDOW, ordered.size)
+        remaining.addAll((ordered.take(prefixSize) + freshIds.map { all.getValue(it) }).shuffled(random))
+        remaining.addAll(ordered.drop(prefixSize))
     }
 
     private fun startNewCycle() {
@@ -326,8 +349,13 @@ class PlaylistEngine(
     }
 
     companion object {
-        /** New photos are inserted within the first N bag positions (shuffle modes). */
+        /** Newly-arrived photos taken within [FRESH_PHOTO_WINDOW] are inserted within the first N
+         *  bag positions (shuffle modes); every other addition just joins the rebuilt shuffle. */
         const val SPLICE_FRONT_WINDOW = 3
+
+        /** "Just uploaded" = taken within this window. Older additions (later sync pages, churned
+         *  rows re-listed by the server) must not jump the queue. */
+        val FRESH_PHOTO_WINDOW: Duration = Duration.ofDays(7)
 
         /** Upper bound on retained back-navigation history. */
         const val MAX_HISTORY = 100

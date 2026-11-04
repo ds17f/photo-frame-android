@@ -169,11 +169,13 @@ fun DisplaySettingsScreen(
             )
             if (settings.orderMode == OrderMode.RECENCY_BOOSTED_SHUFFLE) {
                 StepperRow(
-                    label = "Boost photos from the last",
-                    valueLabel = "${settings.recencyWindowDays} days",
+                    // Smooth boost by capture date: a photo this old is shown ~2x as often as an
+                    // old one (today's ~3x), so newer photos lead without old ones going quiet.
+                    label = "Newer photos: boost halves every",
+                    valueLabel = recencyLabel(settings.recencyWindowDays),
                     position = settings.recencyWindowDays,
                     range = DisplaySettings.RECENCY_WINDOW_DAYS_RANGE.first..DisplaySettings.RECENCY_WINDOW_DAYS_RANGE.last,
-                    step = 5,
+                    step = 30,
                     onPosition = { d -> onUpdate { it.copy(recencyWindowDays = d) } },
                 )
             }
@@ -373,6 +375,9 @@ private fun formatSeconds(s: Int): String = when {
     s == 3600 -> "1h"
     else -> "${s / 60}m ${s % 60}s"
 }
+
+private fun recencyLabel(days: Int): String =
+    if (days < 360) "$days days" else String.format(java.util.Locale.US, "%.1f years", days / 365.0)
 
 private fun labelOfOrder(m: OrderMode) = when (m) {
     OrderMode.SHUFFLE -> "Shuffle"

@@ -94,7 +94,9 @@ class MetadataSyncer(
                     }
                 }
                 if (toInsert.isNotEmpty()) {
-                    photoDao.insertNew(toInsert) // incremental: visible to the slideshow right away
+                    // Incremental: visible to the slideshow right away. Restores show history for photos the
+                    // server's unstable listing dropped earlier and now lists again.
+                    photoDao.insertNewRestoringHistory(toInsert)
                     indexed += toInsert.size
                 }
             }

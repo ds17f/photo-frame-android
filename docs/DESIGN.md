@@ -16,7 +16,7 @@ photos appear on the frame without manual steps.
 
 ## 2. Non-goals (future ideas, explicitly out of scope for v1)
 
-- Weather overlay, background music, video playback.
+- Background music, video playback.
 - Remote control / companion app / multi-frame management.
 - Camera-based presence detection.
 - Play Store / Amazon Appstore distribution (sideload only).
@@ -235,6 +235,17 @@ matters.
   never decode on the UI thread; Coil memory cache sized conservatively for 2 GB RAM.
 
 ## 9. Overlays
+
+- **Desktop dashboard** (optional, off by default): a server-hosted HTTPS page in a
+  transparent, read-only WebView over the local slideshow. Display settings select
+  Off / On tap / Always on, the URL, and photo dimming (default 65%). In On tap mode,
+  tap or remote Select toggles the dashboard and reveals the normal controls; Back
+  closes an opened dashboard first. Native clock/captions yield once the page loads.
+  Dashboard failures restore the local overlays and photo brightness and retry after
+  one minute. Quiet hours remove the dashboard; backgrounding pauses its WebView.
+  The page reloads every 15 minutes to pick up server changes. Only same-origin HTTPS
+  navigation is allowed; no native JavaScript bridge or file/content access is exposed.
+  See [DASHBOARD.md](DASHBOARD.md) for setup and the companion server.
 
 - **Clock & date** (toggleable, on by default): digital time + date, corner position
   setting, semi-transparent white with soft shadow for legibility on any photo. Font

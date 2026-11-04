@@ -39,11 +39,15 @@ data class DisplaySettings(
     val recencyWindowDays: Int = 7,
     /** Roughly what share (%) of shown slides should be favorites (shuffle modes). 0 = no bias,
      *  100 = favorites only. Achieved by drawing each slide from favorites with this probability. */
-    val favoriteSharePercent: Int = 20,
+    val favoriteSharePercent: Int = 0,
     val clockEnabled: Boolean = true,
     val clockCorner: Corner = Corner.TOP_START,
     val clockSize: FontSize = FontSize.MEDIUM,
     val captionEnabled: Boolean = true,
+    val dashboardMode: DashboardMode = DashboardMode.OFF,
+    val dashboardUrl: String = "",
+    /** Black scrim opacity over the photos while the dashboard is visible. */
+    val dashboardDimPercent: Int = 65,
     /** When on, append one timestamped row per shown photo to a persistent playback log file
      *  (diagnostics — inspect for repeats). Default on for now. See [com.photoframe.diagnostics.PlaybackLog]. */
     val playbackLogEnabled: Boolean = true,
@@ -53,5 +57,6 @@ data class DisplaySettings(
         val TRANSITION_SECONDS_RANGE = 0.5f..3.0f
         val RECENCY_WINDOW_DAYS_RANGE = 1..90
         val FAVORITE_SHARE_PERCENT_RANGE = 0..100
+        val DASHBOARD_DIM_PERCENT_RANGE = 0..90
     }
 }

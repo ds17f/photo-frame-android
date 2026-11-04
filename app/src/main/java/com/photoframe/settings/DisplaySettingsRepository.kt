@@ -38,6 +38,11 @@ class DisplaySettingsRepository(private val context: Context) {
             prefs[Keys.CLOCK_CORNER] = next.clockCorner.name
             prefs[Keys.CLOCK_SIZE] = next.clockSize.name
             prefs[Keys.CAPTION_ENABLED] = next.captionEnabled
+            prefs[Keys.DASHBOARD_MODE] = next.dashboardMode.name
+            prefs[Keys.DASHBOARD_URL] = next.dashboardUrl.trim().let { url ->
+                url.takeIf(::isValidDashboardUrl) ?: ""
+            }
+            prefs[Keys.DASHBOARD_DIM] = next.dashboardDimPercent.coerceIn(DisplaySettings.DASHBOARD_DIM_PERCENT_RANGE)
             prefs[Keys.PLAYBACK_LOG] = next.playbackLogEnabled
         }
     }
@@ -57,6 +62,10 @@ class DisplaySettingsRepository(private val context: Context) {
             clockCorner = enumOr(this[Keys.CLOCK_CORNER], d.clockCorner),
             clockSize = enumOr(this[Keys.CLOCK_SIZE], d.clockSize),
             captionEnabled = this[Keys.CAPTION_ENABLED] ?: d.captionEnabled,
+            dashboardMode = enumOr(this[Keys.DASHBOARD_MODE], d.dashboardMode),
+            dashboardUrl = this[Keys.DASHBOARD_URL]?.takeIf(::isValidDashboardUrl) ?: d.dashboardUrl,
+            dashboardDimPercent = (this[Keys.DASHBOARD_DIM] ?: d.dashboardDimPercent)
+                .coerceIn(DisplaySettings.DASHBOARD_DIM_PERCENT_RANGE),
             playbackLogEnabled = this[Keys.PLAYBACK_LOG] ?: d.playbackLogEnabled,
         )
     }
@@ -77,6 +86,9 @@ class DisplaySettingsRepository(private val context: Context) {
         val CLOCK_CORNER = stringPreferencesKey("clock_corner")
         val CLOCK_SIZE = stringPreferencesKey("clock_size")
         val CAPTION_ENABLED = booleanPreferencesKey("caption_enabled")
+        val DASHBOARD_MODE = stringPreferencesKey("dashboard_mode")
+        val DASHBOARD_URL = stringPreferencesKey("dashboard_url")
+        val DASHBOARD_DIM = intPreferencesKey("dashboard_dim_percent")
         val PLAYBACK_LOG = booleanPreferencesKey("playback_log_enabled")
     }
 }

@@ -47,6 +47,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.photoframe.ui.controls.SlideshowControls
+import com.photoframe.ui.dashboard.DashboardOverlay
+import com.photoframe.settings.DashboardMode
+import com.photoframe.settings.isValidDashboardUrl
 import com.photoframe.ui.diagnostics.DiagnosticsScreen
 import com.photoframe.ui.overlay.CaptionOverlay
 import com.photoframe.ui.overlay.ClockOverlay
@@ -143,6 +146,10 @@ fun SlideshowRoute(onExit: () -> Unit) {
     val gphotosSetup by sourcesVm.gphotos.collectAsState()
 
     var screen by remember { mutableStateOf(Screen.SLIDESHOW) }
+    var dashboardOpened by remember(settings.dashboardMode, settings.dashboardUrl) { mutableStateOf(false) }
+    val dashboardConfigured = isValidDashboardUrl(settings.dashboardUrl)
+    val dashboardVisible = dashboardConfigured && (settings.dashboardMode == DashboardMode.ALWAYS ||
+        (settings.dashboardMode == DashboardMode.ON_TAP && dashboardOpened))
     var menuPhoto by remember { mutableStateOf<UiPhoto?>(null) }      // long-press action menu
     var confirmDelete by remember { mutableStateOf<UiPhoto?>(null) }  // delete confirmation
     val context = LocalContext.current
@@ -328,7 +335,10 @@ fun SlideshowRoute(onExit: () -> Unit) {
 
             // First back shows controls; a second back while they're visible exits (§11).
             BackHandler {
-                if (state.controlsVisible) {
+                if (dashboardOpened) {
+                    dashboardOpened = false
+                    slideshowVm.hideControls()
+                } else if (state.controlsVisible) {
                     Toast.makeText(context, "The frame will stop", Toast.LENGTH_SHORT).show()
                     onExit()
                 } else {
@@ -337,7 +347,16 @@ fun SlideshowRoute(onExit: () -> Unit) {
             }
             SlideshowContent(
                 state = state,
-                onTap = { slideshowVm.showControls() },
+                dashboardVisible = dashboardVisible,
+                onTap = {
+                    if (dashboardOpened || state.controlsVisible) {
+                        dashboardOpened = false
+                        slideshowVm.hideControls()
+                    } else {
+                        dashboardOpened = settings.dashboardMode == DashboardMode.ON_TAP && dashboardConfigured
+                        slideshowVm.showControls()
+                    }
+                },
                 onSwipeNext = { slideshowVm.next() },
                 onSwipePrevious = { slideshowVm.previous() },
                 onNext = { slideshowVm.next() },
@@ -352,9 +371,8 @@ fun SlideshowRoute(onExit: () -> Unit) {
             // (favorite immediately / delete → confirm) — all in one dialog, no extra tap.
             menuPhoto?.let { photo ->
                 // Resolve the per-photo web URL for the QR; null (non-Immich) simply omits the QR.
-                val qrUrl by produceState<String?>(null, photo.id) {
-                    value = slideshowVm.photoWebUrl(photo)
-                }
+                var qrUrl by remember(photo.id) { mutableStateOf<String?>(null) }
+                LaunchedEffect(photo.id) { qrUrl = slideshowVm.photoWebUrl(photo) }
                 AlertDialog(
                     onDismissRequest = { menuPhoto = null },
                     title = { Text("Photo actions") },
@@ -447,6 +465,7 @@ private fun SyncingPlaceholder(loading: Boolean, photoCount: Int) {
 @Composable
 private fun SlideshowContent(
     state: SlideshowUiState,
+    dashboardVisible: Boolean,
     onTap: () -> Unit,
     onSwipeNext: () -> Unit,
     onSwipePrevious: () -> Unit,
@@ -459,6 +478,7 @@ private fun SlideshowContent(
 ) {
     val isLandscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var dashboardReady by remember(dashboardVisible, state.settings.dashboardUrl) { mutableStateOf(false) }
 
     // The photo a remote user acts on from the controls' "…" button: the single photo, or the
     // primary (left/top) half of a split. Long-press picks the exact half on a touchscreen.
@@ -497,26 +517,6 @@ private fun SlideshowContent(
                         else -> false
                     } else false
                 }
-            }
-            .pointerInput(state.slide, isLandscape) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    // Long-press a photo (or one side of a split) to delete it (§11 extension).
-                    onLongPress = { offset ->
-                        pickPhotoAt(state.slide, offset, size, isLandscape)?.let(onPhotoLongPress)
-                    },
-                )
-            }
-            .pointerInput(Unit) {
-                var dragTotal = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dragTotal = 0f },
-                    onHorizontalDrag = { _, delta -> dragTotal += delta },
-                    onDragEnd = {
-                        if (dragTotal <= -SWIPE_THRESHOLD) onSwipeNext()
-                        else if (dragTotal >= SWIPE_THRESHOLD) onSwipePrevious()
-                    },
-                )
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -526,16 +526,46 @@ private fun SlideshowContent(
         } else {
             SlideRenderer(slide = slide, settings = state.settings)
 
-            if (state.settings.clockEnabled) {
+            if (state.settings.clockEnabled && !dashboardReady) {
                 ClockOverlay(corner = state.settings.clockCorner, size = state.settings.clockSize)
             }
-            if (state.settings.captionEnabled) {
+            if (state.settings.captionEnabled && !dashboardReady) {
                 CaptionOverlay(
                     slide = slide,
                     corner = OverlayLayout.captionCorner(state.settings.clockCorner),
                 )
             }
         }
+
+        if (dashboardVisible) {
+            DashboardOverlay(
+                url = state.settings.dashboardUrl,
+                dimPercent = state.settings.dashboardDimPercent,
+                onReady = { dashboardReady = it },
+            )
+        }
+
+        // Keep all touch input native, including when a web dashboard covers the photo.
+        Box(Modifier.matchParentSize()
+            .pointerInput(state.slide, isLandscape, onTap) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onLongPress = { offset ->
+                        pickPhotoAt(state.slide, offset, size, isLandscape)?.let(onPhotoLongPress)
+                    },
+                )
+            }
+            .pointerInput(onSwipeNext, onSwipePrevious) {
+                var dragTotal = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onHorizontalDrag = { _, delta -> dragTotal += delta },
+                    onDragEnd = {
+                        if (dragTotal <= -SWIPE_THRESHOLD) onSwipeNext()
+                        else if (dragTotal >= SWIPE_THRESHOLD) onSwipePrevious()
+                    },
+                )
+            })
 
         SlideshowControls(
             visible = state.controlsVisible,

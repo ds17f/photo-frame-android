@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,14 +21,29 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import kotlinx.coroutines.delay
 import com.photoframe.ui.tv.rememberInitialFocusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,6 +52,8 @@ import com.photoframe.playlist.model.OrderMode
 import com.photoframe.playlist.model.PortraitMode
 import com.photoframe.settings.Corner
 import com.photoframe.settings.DisplaySettings
+import com.photoframe.settings.DashboardMode
+import com.photoframe.settings.isValidDashboardUrl
 import com.photoframe.settings.FontSize
 import com.photoframe.settings.Transition
 import kotlin.math.roundToInt
@@ -52,13 +71,72 @@ fun DisplaySettingsScreen(
     onUpdate: ((DisplaySettings) -> DisplaySettings) -> Unit,
     onBack: () -> Unit,
 ) {
+    var dashboardUrlDraft by rememberSaveable { mutableStateOf(settings.dashboardUrl) }
+    var dashboardUrlEdited by rememberSaveable { mutableStateOf(false) }
+    var dashboardUrlSaveState by rememberSaveable { mutableStateOf("Saved") }
+    val latestSettings by rememberUpdatedState(settings)
+    val latestOnUpdate by rememberUpdatedState(onUpdate)
+    val dashboardUrlValid = dashboardUrlDraft.isBlank() || isValidDashboardUrl(dashboardUrlDraft.trim())
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val commitDashboardUrl = {
+        if (dashboardUrlEdited) {
+            val candidate = dashboardUrlDraft.trim()
+            if (candidate.isBlank() || isValidDashboardUrl(candidate)) {
+                dashboardUrlDraft = candidate
+                if (candidate == latestSettings.dashboardUrl) {
+                    dashboardUrlEdited = false
+                    dashboardUrlSaveState = "Saved"
+                } else {
+                    latestOnUpdate { it.copy(dashboardUrl = candidate) }
+                    dashboardUrlSaveState = "Saving…"
+                }
+            }
+        }
+    }
+    val leaveScreen = {
+        commitDashboardUrl()
+        onBack()
+    }
+    BackHandler { leaveScreen() }
+    LaunchedEffect(dashboardUrlDraft, dashboardUrlEdited) {
+        if (!dashboardUrlEdited) return@LaunchedEffect
+        val candidate = dashboardUrlDraft.trim()
+        if (candidate.isNotBlank() && !isValidDashboardUrl(candidate)) {
+            dashboardUrlSaveState = "Invalid URL — saved URL is unchanged."
+            return@LaunchedEffect
+        }
+        if (candidate == settings.dashboardUrl) {
+            dashboardUrlEdited = false
+            dashboardUrlSaveState = "Saved"
+            return@LaunchedEffect
+        }
+        dashboardUrlSaveState = "Unsaved — saving automatically…"
+        delay(700)
+        if (candidate != latestSettings.dashboardUrl) {
+            latestOnUpdate { it.copy(dashboardUrl = candidate) }
+            dashboardUrlSaveState = "Saving…"
+        } else {
+            dashboardUrlEdited = false
+            dashboardUrlSaveState = "Saved"
+        }
+    }
+    LaunchedEffect(settings.dashboardUrl) {
+        if (!dashboardUrlEdited) {
+            dashboardUrlDraft = settings.dashboardUrl
+            dashboardUrlSaveState = "Saved"
+        } else if (dashboardUrlDraft.trim() == settings.dashboardUrl) {
+            dashboardUrlEdited = false
+            dashboardUrlSaveState = "Saved"
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Display") },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = leaveScreen,
                         modifier = Modifier.focusRequester(rememberInitialFocusRequester()),
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -169,6 +247,60 @@ fun DisplaySettingsScreen(
             SwitchRow("Show photo caption", settings.captionEnabled) { on ->
                 onUpdate { it.copy(captionEnabled = on) }
             }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            SectionHeader("Desktop dashboard")
+            ChoiceRow(
+                label = "Show dashboard",
+                options = DashboardMode.entries,
+                selected = settings.dashboardMode,
+                labelOf = { mode -> when (mode) {
+                    DashboardMode.OFF -> "Off"
+                    DashboardMode.ON_TAP -> "On tap"
+                    DashboardMode.ALWAYS -> "Always on"
+                } },
+                onSelect = { mode -> onUpdate { it.copy(dashboardMode = mode) } },
+            )
+            Text(
+                "On tap: tap to open the dashboard, then tap again or press Back to hide it. " +
+                    "Taps and Back still show the slideshow controls. The dashboard is a passive display.",
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = dashboardUrlDraft,
+                onValueChange = {
+                    dashboardUrlDraft = it
+                    dashboardUrlEdited = true
+                    dashboardUrlSaveState = "Unsaved — saving automatically…"
+                },
+                label = { Text("Dashboard URL") },
+                placeholder = { Text("https://dashboard.example.com/frame") },
+                singleLine = true,
+                isError = !dashboardUrlValid,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done, capitalization = KeyboardCapitalization.None, autoCorrect = false),
+                keyboardActions = KeyboardActions(onDone = {
+                    commitDashboardUrl()
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                }),
+                supportingText = {
+                    Text(if (!dashboardUrlValid) "Invalid URL — enter a valid HTTPS URL without embedded credentials. The last saved URL is unchanged."
+                    else if (dashboardUrlDraft.trim() == settings.dashboardUrl) "Saved · Use an HTTPS page with a transparent background."
+                    else dashboardUrlSaveState)
+                },
+                modifier = Modifier.fillMaxWidth().onFocusChanged { state ->
+                    if (!state.isFocused) commitDashboardUrl()
+                },
+            )
+            StepperRow(
+                label = "Dim photos behind dashboard",
+                valueLabel = "${settings.dashboardDimPercent}%",
+                position = settings.dashboardDimPercent,
+                range = DisplaySettings.DASHBOARD_DIM_PERCENT_RANGE,
+                step = 5,
+                onPosition = { value -> onUpdate { it.copy(dashboardDimPercent = value) } },
+            )
 
             Spacer(Modifier.height(16.dp))
             SectionHeader("Diagnostics")

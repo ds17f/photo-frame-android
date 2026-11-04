@@ -8,6 +8,7 @@ down. Sideloaded and personal-use; not published to any store.
 - **Design & rationale:** [`docs/DESIGN.md`](docs/DESIGN.md)
 - **Build plan / phases:** [`docs/PLAN.md`](docs/PLAN.md)
 - **API discrepancies log:** [`docs/API_NOTES.md`](docs/API_NOTES.md)
+- **Desktop dashboard (weather and school reminders):** [`docs/DASHBOARD.md`](docs/DASHBOARD.md)
 
 ## Requirements
 
